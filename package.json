@@ -1,18 +1,15 @@
 {
-  "name": "openclaw-flow",
+  "name": "@pallaoro/openclaw-flow",
   "version": "0.2.0",
   "description": "The n8n for agents. A declarative, AI-native workflow format that agents can read, write, and run.",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "index.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "import": "./index.ts"
     },
-    "./plugin": {
-      "import": "./dist/plugin/index.js",
-      "types": "./dist/plugin/index.d.ts"
+    "./core": {
+      "import": "./src/index.ts"
     }
   },
   "scripts": {
@@ -22,19 +19,21 @@
     "clean": "rm -rf dist"
   },
   "openclaw": {
-    "extensions": ["./dist/plugin/index.js"]
+    "extensions": ["./index.ts"]
   },
   "files": [
-    "dist",
-    "src",
+    "index.ts",
+    "src/**/*.ts",
     "openclaw.plugin.json",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "keywords": [
+    "openclaw",
+    "openclaw-plugin",
     "workflow",
     "agent",
     "ai",
-    "openclaw",
     "cloudflare",
     "orchestration",
     "declarative"
@@ -46,9 +45,23 @@
   "dependencies": {
     "@sinclair/typebox": "^0.32.0"
   },
+  "peerDependencies": {
+    "openclaw": "*"
+  },
   "devDependencies": {
     "@types/node": "^25.5.0",
     "tsx": "^4.19.0",
     "typescript": "^5.5.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pallaoro/openclawflow.git"
+  },
+  "homepage": "https://github.com/pallaoro/openclawflow#readme",
+  "bugs": {
+    "url": "https://github.com/pallaoro/openclawflow/issues"
   }
 }
