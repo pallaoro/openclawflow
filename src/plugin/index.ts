@@ -15,12 +15,49 @@ interface PluginApi {
   registerTool: (def: object, opts?: { optional?: boolean }) => void;
   config?: {
     plugins?: { entries?: Record<string, { config?: PluginConfig }> };
+    gateway?: { port?: number; host?: string };
+    [key: string]: unknown;
+  };
+  runtime?: {
+    config?: { loadConfig?: () => unknown };
+    [key: string]: unknown;
+  };
+  logger?: {
+    info: (msg: string) => void;
+    warn: (msg: string) => void;
+    error: (msg: string) => void;
   };
 }
 
 function register(api: PluginApi) {
-  const pluginCfg: PluginConfig =
+  const rawCfg: PluginConfig =
     api.config?.plugins?.entries?.["openclaw-flow"]?.config ?? {};
+
+  // Auto-detect gateway URL when running inside OpenClaw
+  const gatewayPort =
+    rawCfg.gatewayUrl
+      ? undefined // user explicitly configured, skip detection
+      : api.config?.gateway?.port ??
+        (process.env.OPENCLAW_GATEWAY_PORT
+          ? parseInt(process.env.OPENCLAW_GATEWAY_PORT, 10)
+          : 18789);
+
+  const gatewayHost =
+    api.config?.gateway?.host ?? process.env.OPENCLAW_GATEWAY_HOST ?? "127.0.0.1";
+
+  const pluginCfg: PluginConfig = {
+    ...rawCfg,
+    // Auto-set gateway URL so do:ai nodes route through OpenClaw's providers
+    gatewayUrl: rawCfg.gatewayUrl ?? `http://${gatewayHost}:${gatewayPort}`,
+    gatewayToken:
+      rawCfg.gatewayToken ??
+      process.env.OPENCLAW_GATEWAY_TOKEN ??
+      process.env.OPENCLAW_GATEWAY_PASSWORD,
+  };
+
+  api.logger?.info?.(
+    `[openclaw-flow] AI backend: gateway at ${pluginCfg.gatewayUrl}`,
+  );
 
   const runner = new FlowRunner(pluginCfg);
   const store = runner.getStore();

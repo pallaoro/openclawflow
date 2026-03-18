@@ -182,6 +182,25 @@ export interface FlowResult {
   error?: string;
 }
 
+// ---- Inference Function ---------------------------------------------------------
+// Pluggable AI completion function. When running inside OpenClaw, the plugin
+// injects a function that calls the gateway's OpenAI-compatible endpoint,
+// reusing whatever providers/keys are already configured.
+
+export interface InferenceRequest {
+  model: string;
+  system: string;
+  prompt: string;
+  temperature?: number;
+  maxTokens?: number;
+}
+
+export interface InferenceResult {
+  text: string;
+}
+
+export type InferenceFn = (req: InferenceRequest) => Promise<InferenceResult>;
+
 // ---- Plugin Config --------------------------------------------------------------
 
 export interface PluginConfig {
@@ -191,6 +210,12 @@ export interface PluginConfig {
   memoryDir?: string;
   maxNodeDurationMs?: number;
   stateDir?: string; // where to persist flow state across restarts
+  /** Injected by the OpenClaw plugin to route AI calls through the gateway */
+  inferenceFn?: InferenceFn;
+  /** Gateway URL for OpenAI-compatible endpoint (auto-detected when running in OpenClaw) */
+  gatewayUrl?: string;
+  /** Gateway auth token */
+  gatewayToken?: string;
 }
 
 // ---- Model Shorthands -----------------------------------------------------------

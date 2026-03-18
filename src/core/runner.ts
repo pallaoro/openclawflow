@@ -362,13 +362,6 @@ export class FlowRunner {
     node: AiNode,
     state: FlowState,
   ): Promise<{ output: unknown }> {
-    const apiKey = this.cfg.apiKey ?? process.env.ANTHROPIC_API_KEY;
-    if (!apiKey)
-      throw new Error(
-        "No API key. Set apiKey in plugin config or ANTHROPIC_API_KEY env.",
-      );
-
-    const baseUrl = this.cfg.baseUrl ?? "https://api.anthropic.com";
     const model =
       MODEL_MAP[node.model ?? "smart"] ??
       node.model ??
@@ -387,29 +380,13 @@ export class FlowRunner {
         ? `${prompt}\n\nInput:\n${typeof input === "object" ? JSON.stringify(input, null, 2) : String(input)}`
         : prompt;
 
-    const resp = await fetch(`${baseUrl}/v1/messages`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 1024,
-        temperature: node.temperature ?? 0,
-        system: `You are a workflow step. Follow the prompt exactly.${jsonInstructions}`,
-        messages: [{ role: "user", content: userContent }],
-      }),
-    });
+    const system = `You are a workflow step. Follow the prompt exactly.${jsonInstructions}`;
 
-    if (!resp.ok)
-      throw new Error(`AI API ${resp.status}: ${await resp.text()}`);
-
-    const data = (await resp.json()) as {
-      content: Array<{ type: string; text: string }>;
-    };
-    const text = data.content.find((b) => b.type === "text")?.text ?? "";
+    // Resolution order:
+    // 1. Injected inferenceFn (set by OpenClaw plugin — uses gateway providers)
+    // 2. Gateway OpenAI-compatible endpoint (auto-detected or configured)
+    // 3. Direct Anthropic API (requires ANTHROPIC_API_KEY)
+    const text = await this.callInference(model, system, userContent, node.temperature);
 
     if (node.schema) {
       const clean = text
@@ -426,6 +403,200 @@ export class FlowRunner {
     }
 
     return { output: text.trim() };
+  }
+
+  // ---- Inference dispatch -------------------------------------------------------
+  // Tries multiple backends in order: injected fn > gateway > direct Anthropic API
+
+  private async callInference(
+    model: string,
+    system: string,
+    prompt: string,
+    temperature?: number,
+  ): Promise<string> {
+    // 1. Injected inference function (from OpenClaw plugin)
+    if (this.cfg.inferenceFn) {
+      const result = await this.cfg.inferenceFn({
+        model,
+        system,
+        prompt,
+        temperature: temperature ?? 0,
+        maxTokens: 1024,
+      });
+      return result.text;
+    }
+
+    // 2. OpenClaw gateway (OpenAI-compatible endpoint)
+    const gatewayUrl =
+      this.cfg.gatewayUrl ??
+      process.env.OPENCLAW_GATEWAY_URL ??
+      this.detectGatewayUrl();
+
+    if (gatewayUrl) {
+      return this.callGateway(gatewayUrl, model, system, prompt, temperature);
+    }
+
+    // 3. Direct API (OpenRouter > Anthropic > OpenAI)
+    return this.callDirectApi(model, system, prompt, temperature);
+  }
+
+  private detectGatewayUrl(): string | undefined {
+    // Check common env vars that indicate a gateway is running
+    const port = process.env.OPENCLAW_GATEWAY_PORT ?? "18789";
+    const host = process.env.OPENCLAW_GATEWAY_HOST ?? "127.0.0.1";
+    // Only auto-detect if we're likely running inside an OpenClaw context
+    if (process.env.OPENCLAW_STATE_DIR || process.env.OPENCLAW_GATEWAY_PORT) {
+      return `http://${host}:${port}`;
+    }
+    return undefined;
+  }
+
+  private async callGateway(
+    gatewayUrl: string,
+    model: string,
+    system: string,
+    prompt: string,
+    temperature?: number,
+  ): Promise<string> {
+    const token =
+      this.cfg.gatewayToken ??
+      process.env.OPENCLAW_GATEWAY_TOKEN ??
+      process.env.OPENCLAW_GATEWAY_PASSWORD;
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+
+    const resp = await fetch(`${gatewayUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model,
+        temperature: temperature ?? 0,
+        max_tokens: 1024,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: prompt },
+        ],
+      }),
+    });
+
+    if (!resp.ok) {
+      const body = await resp.text();
+      throw new Error(`Gateway AI call failed (${resp.status}): ${body}`);
+    }
+
+    const data = (await resp.json()) as {
+      choices: Array<{ message: { content: string } }>;
+    };
+    return data.choices?.[0]?.message?.content ?? "";
+  }
+
+  private async callDirectApi(
+    model: string,
+    system: string,
+    prompt: string,
+    temperature?: number,
+  ): Promise<string> {
+    // Try OpenRouter first, then Anthropic, then OpenAI
+    const openrouterKey = process.env.OPENROUTER_API_KEY;
+    const anthropicKey = this.cfg.apiKey ?? process.env.ANTHROPIC_API_KEY;
+    const openaiKey = process.env.OPENAI_API_KEY;
+
+    if (openrouterKey) {
+      return this.callOpenAiCompatible(
+        "https://openrouter.ai/api",
+        openrouterKey,
+        model,
+        system,
+        prompt,
+        temperature,
+        "OpenRouter",
+      );
+    }
+
+    if (anthropicKey) {
+      const baseUrl = this.cfg.baseUrl ?? "https://api.anthropic.com";
+      const resp = await fetch(`${baseUrl}/v1/messages`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": anthropicKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 1024,
+          temperature: temperature ?? 0,
+          system,
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+      if (!resp.ok)
+        throw new Error(`Anthropic API ${resp.status}: ${await resp.text()}`);
+      const data = (await resp.json()) as {
+        content: Array<{ type: string; text: string }>;
+      };
+      return data.content.find((b) => b.type === "text")?.text ?? "";
+    }
+
+    if (openaiKey) {
+      return this.callOpenAiCompatible(
+        this.cfg.baseUrl ?? "https://api.openai.com",
+        openaiKey,
+        model,
+        system,
+        prompt,
+        temperature,
+        "OpenAI",
+      );
+    }
+
+    throw new Error(
+      "No AI backend available. Either:\n" +
+        "  - Run inside OpenClaw (gateway auto-detected)\n" +
+        "  - Set gatewayUrl in plugin config\n" +
+        "  - Set OPENROUTER_API_KEY env var\n" +
+        "  - Set ANTHROPIC_API_KEY env var\n" +
+        "  - Set OPENAI_API_KEY env var\n" +
+        "  - Set apiKey in plugin config",
+    );
+  }
+
+  private async callOpenAiCompatible(
+    baseUrl: string,
+    apiKey: string,
+    model: string,
+    system: string,
+    prompt: string,
+    temperature: number | undefined,
+    provider: string,
+  ): Promise<string> {
+    const resp = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 1024,
+        temperature: temperature ?? 0,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: prompt },
+        ],
+      }),
+    });
+    if (!resp.ok)
+      throw new Error(`${provider} API ${resp.status}: ${await resp.text()}`);
+    const data = (await resp.json()) as {
+      choices: Array<{ message: { content: string } }>;
+    };
+    return data.choices?.[0]?.message?.content ?? "";
   }
 
   // ---- do: agent ----------------------------------------------------------------
