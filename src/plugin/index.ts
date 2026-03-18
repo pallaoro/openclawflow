@@ -1,4 +1,3 @@
-import { Type } from "@sinclair/typebox";
 import { FlowRunner, sendEvent } from "../core/runner.js";
 import { transpileToCloudflare } from "../core/transpile.js";
 import type { FlowDefinition, PluginConfig } from "../core/types.js";
@@ -49,33 +48,33 @@ All nodes support retry: { limit, delay, backoff } and timeout.
 Templates: use {{ nodeName.field }} to reference any value in flow state.
 Returns instanceId for status tracking and resume.`,
 
-      parameters: Type.Object({
-        flow: Type.Optional(
-          Type.Object(
-            {
-              flow: Type.String(),
-              description: Type.Optional(Type.String()),
-              nodes: Type.Array(
-                Type.Object({}, { additionalProperties: true }),
-              ),
+      parameters: {
+        type: "object",
+        properties: {
+          flow: {
+            type: "object",
+            properties: {
+              flow: { type: "string" },
+              description: { type: "string" },
+              nodes: {
+                type: "array",
+                items: { type: "object", additionalProperties: true },
+              },
             },
-            { additionalProperties: true },
-          ),
-        ),
-        file: Type.Optional(
-          Type.String({ description: "Path to a .json flow file" }),
-        ),
-        input: Type.Optional(
-          Type.Object(
-            {},
-            {
-              additionalProperties: true,
-              description:
-                "Input data, available as trigger.* in the flow",
-            },
-          ),
-        ),
-      }),
+            required: ["flow", "nodes"],
+            additionalProperties: true,
+          },
+          file: {
+            type: "string",
+            description: "Path to a .json flow file",
+          },
+          input: {
+            type: "object",
+            additionalProperties: true,
+            description: "Input data, available as trigger.* in the flow",
+          },
+        },
+      },
 
       async execute(
         _id: string,
@@ -141,22 +140,29 @@ Use the instanceId (= resumeToken) from a flow_run result where status was "paus
 Set approved=true to continue, false to cancel.
 You must pass the original flow definition back so the runner can continue.`,
 
-      parameters: Type.Object({
-        instanceId: Type.String({
-          description:
-            "The instanceId from the paused flow_run result",
-        }),
-        approved: Type.Boolean(),
-        flow: Type.Object(
-          {
-            flow: Type.String(),
-            nodes: Type.Array(
-              Type.Object({}, { additionalProperties: true }),
-            ),
+      parameters: {
+        type: "object",
+        required: ["instanceId", "approved", "flow"],
+        properties: {
+          instanceId: {
+            type: "string",
+            description: "The instanceId from the paused flow_run result",
           },
-          { additionalProperties: true },
-        ),
-      }),
+          approved: { type: "boolean" },
+          flow: {
+            type: "object",
+            required: ["flow", "nodes"],
+            properties: {
+              flow: { type: "string" },
+              nodes: {
+                type: "array",
+                items: { type: "object", additionalProperties: true },
+              },
+            },
+            additionalProperties: true,
+          },
+        },
+      },
 
       async execute(
         _id: string,
@@ -203,16 +209,21 @@ This is the equivalent of Cloudflare's instance.sendEvent().
 The eventType must match the "event" field on the wait node.
 payload is passed as the output of the wait node and into flow state.`,
 
-      parameters: Type.Object({
-        instanceId: Type.String(),
-        eventType: Type.String({
-          description:
-            "Must match the 'event' field of the wait node",
-        }),
-        payload: Type.Optional(
-          Type.Object({}, { additionalProperties: true }),
-        ),
-      }),
+      parameters: {
+        type: "object",
+        required: ["instanceId", "eventType"],
+        properties: {
+          instanceId: { type: "string" },
+          eventType: {
+            type: "string",
+            description: "Must match the 'event' field of the wait node",
+          },
+          payload: {
+            type: "object",
+            additionalProperties: true,
+          },
+        },
+      },
 
       async execute(
         _id: string,
@@ -258,20 +269,20 @@ payload is passed as the output of the wait node and into flow state.`,
       description: `Get the status and state of a flow instance, or list all instances.
 Status values: running | completed | paused | waiting | failed | cancelled`,
 
-      parameters: Type.Object({
-        instanceId: Type.Optional(
-          Type.String({
-            description:
-              "Specific instance to inspect. Omit to list all.",
-          }),
-        ),
-        filter: Type.Optional(
-          Type.String({
+      parameters: {
+        type: "object",
+        properties: {
+          instanceId: {
+            type: "string",
+            description: "Specific instance to inspect. Omit to list all.",
+          },
+          filter: {
+            type: "string",
             description:
               "Filter by status: running | completed | paused | waiting | failed | cancelled",
-          }),
-        ),
-      }),
+          },
+        },
+      },
 
       async execute(
         _id: string,
@@ -327,17 +338,24 @@ Each node maps to a Cloudflare Workflows primitive:
   sleep      → step.sleep()
   parallel   → Promise.all() / Promise.race()`,
 
-      parameters: Type.Object({
-        flow: Type.Object(
-          {
-            flow: Type.String(),
-            nodes: Type.Array(
-              Type.Object({}, { additionalProperties: true }),
-            ),
+      parameters: {
+        type: "object",
+        required: ["flow"],
+        properties: {
+          flow: {
+            type: "object",
+            required: ["flow", "nodes"],
+            properties: {
+              flow: { type: "string" },
+              nodes: {
+                type: "array",
+                items: { type: "object", additionalProperties: true },
+              },
+            },
+            additionalProperties: true,
           },
-          { additionalProperties: true },
-        ),
-      }),
+        },
+      },
 
       async execute(
         _id: string,
