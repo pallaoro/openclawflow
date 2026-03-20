@@ -1,4 +1,5 @@
-# clawflow
+<img width="2816" height="1536" alt="Image" src="https://github.com/user-attachments/assets/ff7c98e6-ee70-4b4c-89ff-7c530369fdcb" />
+<div class="markdown-heading" dir="auto"><h1 align="center" tabindex="-1" class="heading-element" dir="auto">ClawFlow</h1><a id="user-content-clawflow" class="anchor" aria-label="Permalink: ClawFlow" href="#clawflow"></a></div>
 
 > The n8n for agents. A declarative, AI-native workflow format that agents can read, write, and run — without infrastructure.
 
