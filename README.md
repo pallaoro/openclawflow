@@ -1,4 +1,6 @@
-<img width="2816" height="1536" alt="Image" src="https://github.com/user-attachments/assets/ff7c98e6-ee70-4b4c-89ff-7c530369fdcb" />
+<p align="center" dir="auto">
+  <a target="_blank" rel="noopener noreferrer" href="https://www.clawnify.com"><img src="https://github.com/user-attachments/assets/ff7c98e6-ee70-4b4c-89ff-7c530369fdcb" alt="ClawFlow" width="600" style="max-width: 100%;"></a>
+</p>
 <div class="markdown-heading" dir="auto"><h1 align="center" tabindex="-1" class="heading-element" dir="auto">ClawFlow</h1><a id="user-content-clawflow" class="anchor" aria-label="Permalink: ClawFlow" href="#clawflow"></a></div>
 
 > The n8n for agents. A declarative, AI-native workflow format that agents can read, write, and run — without infrastructure.
