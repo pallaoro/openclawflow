@@ -673,7 +673,11 @@ export class FlowRunner {
       return null;
     }
 
-    const args = ["agent", "--agent", agentId ?? "main", "--message", message];
+    // --local runs embedded (no gateway session) — ideal for background tasks.
+    // --agent targets a specific configured agent when explicitly set.
+    const args = agentId
+      ? ["agent", "--agent", agentId, "--message", message]
+      : ["agent", "--local", "--message", message];
 
     try {
       const { stdout } = await execFileAsync("openclaw", args, {
