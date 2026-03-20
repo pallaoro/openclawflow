@@ -1,7 +1,7 @@
 {
   "id": "openclaw-flow",
-  "name": "OpenClaw Flow",
-  "description": "Agentic workflow engine for OpenClaw. AI-native, LLM-writable, Cloudflare-portable.",
+  "name": "ClawFlow",
+  "description": "The n8n for agents. Declarative, AI-native workflow engine — LLM-writable, Cloudflare-portable.",
   "version": "0.2.2",
   "skills": ["./skills/flow"],
   "configSchema": {

@@ -1,5 +1,5 @@
 {
-  "name": "@pallaoro/openclaw-flow",
+  "name": "@clawnify/clawflow",
   "version": "0.2.0",
   "description": "The n8n for agents. A declarative, AI-native workflow format that agents can read, write, and run.",
   "type": "module",
@@ -57,10 +57,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/pallaoro/openclawflow.git"
+    "url": "git+https://github.com/clawnify/clawflow.git"
   },
-  "homepage": "https://github.com/pallaoro/openclawflow#readme",
+  "homepage": "https://github.com/clawnify/clawflow#readme",
   "bugs": {
-    "url": "https://github.com/pallaoro/openclawflow/issues"
+    "url": "https://github.com/clawnify/clawflow/issues"
   }
 }

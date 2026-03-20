@@ -1,4 +1,4 @@
-// ---- openclaw-flow v0.2 ---------------------------------------------------------
+// ---- clawflow v0.2 --------------------------------------------------------------
 // Declarative agentic workflow format.
 // Designed to be written by LLMs, run anywhere.
 //

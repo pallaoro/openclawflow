@@ -1,4 +1,4 @@
-// openclaw-flow — core exports
+// clawflow — core exports
 export { FlowRunner, sendEvent } from "./core/runner.js";
 export { StateStore } from "./core/store.js";
 export { transpileToCloudflare } from "./core/transpile.js";

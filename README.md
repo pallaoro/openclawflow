@@ -1,4 +1,4 @@
-# openclaw-flow
+# clawflow
 
 > The n8n for agents. A declarative, AI-native workflow format that agents can read, write, and run — without infrastructure.
 
@@ -20,7 +20,7 @@ None of them answer the core question: **what if the agent itself needs to desig
 
 ## The Vision
 
-**`openclaw-flow` is a workflow format designed from first principles for agents.**
+**`clawflow` is a workflow format designed from first principles for agents.**
 
 Three rules drove every design decision:
 
@@ -35,7 +35,7 @@ Three rules drove every design decision:
 ## What We're Building
 
 ```
-openclaw-flow/
+clawflow/
 │
 ├── Format Spec         The .flow JSON/YAML definition language
 ├── OpenClaw Plugin     Run flows inside OpenClaw as agent tools (today)
@@ -411,8 +411,8 @@ Five tools registered in OpenClaw:
 
 **Install:**
 ```bash
-cp -r openclaw-flow ~/.openclaw/extensions/openclaw-flow
-cd ~/.openclaw/extensions/openclaw-flow && npm install --ignore-scripts
+cp -r clawflow ~/.openclaw/extensions/clawflow
+cd ~/.openclaw/extensions/clawflow && npm install --ignore-scripts
 ```
 
 **Config:**
@@ -420,7 +420,7 @@ cd ~/.openclaw/extensions/openclaw-flow && npm install --ignore-scripts
 {
   "plugins": {
     "entries": {
-      "openclaw-flow": {
+      "clawflow": {
         "enabled": true,
         "config": { "defaultModel": "smart" }
       }
@@ -443,7 +443,7 @@ cd ~/.openclaw/extensions/openclaw-flow && npm install --ignore-scripts
 
 Node mapping:
 
-| openclaw-flow | Cloudflare Workflows |
+| clawflow | Cloudflare Workflows |
 |---|---|
 | `do: ai` | `step.do()` with AI provider call |
 | `do: agent` | `step.do()` with extended AI call |
@@ -482,10 +482,10 @@ GET   /flows/instances/:id   # get instance status
 A community library of reusable, shareable `.flow` definitions. Think npm for workflows — or n8n's template library, but agent-writable.
 
 ```
-openclaw-flow install support-triage
-openclaw-flow install github-pr-review
-openclaw-flow install invoice-processing
-openclaw-flow install lead-enrichment
+clawflow install support-triage
+clawflow install github-pr-review
+clawflow install invoice-processing
+clawflow install lead-enrichment
 ```
 
 Every flow in the registry is:
@@ -540,7 +540,7 @@ Rules:
 
 ## Comparison
 
-| | n8n | LangGraph | Cloudflare Workflows | Lobster | openclaw-flow |
+| | n8n | LangGraph | Cloudflare Workflows | Lobster | clawflow |
 |---|---|---|---|---|---|
 | AI nodes first-class | ✗ | ✓ | ✗ | partial | ✓ |
 | Agent nodes | ✗ | ✓ | ✗ | ✗ | ✓ |
@@ -588,9 +588,9 @@ Rules:
 - [ ] Cost estimation before run
 
 ### v1.0 — Registry and ecosystem
-- [ ] `openclaw-flow install <name>` — install community flows
-- [ ] `openclaw-flow publish <file>` — publish to registry
-- [ ] Flow validation: `openclaw-flow validate <file>` — check for dead paths, missing outputs, invalid references
+- [ ] `clawflow install <name>` — install community flows
+- [ ] `clawflow publish <file>` — publish to registry
+- [ ] Flow validation: `clawflow validate <file>` — check for dead paths, missing outputs, invalid references
 - [ ] YAML support in addition to JSON
 - [ ] TypeScript type generation from flow schema fields
 - [ ] Visual canvas (read-only at first — render a flow as a diagram)
@@ -646,7 +646,7 @@ The next version of that market isn't humans clicking nodes. It's agents designi
 
 The gap isn't another visual canvas. It's a **format that agents can write**, combined with a **runtime that's durable enough to be trusted** with real business processes.
 
-openclaw-flow is a bet that the format comes first. Get the spec right, build the OpenClaw plugin to validate it, transpile to Cloudflare to prove portability, build the registry to prove the ecosystem. The canvas comes last, once the format is stable — because at that point you're just rendering JSON you already understand.
+clawflow is a bet that the format comes first. Get the spec right, build the OpenClaw plugin to validate it, transpile to Cloudflare to prove portability, build the registry to prove the ecosystem. The canvas comes last, once the format is stable — because at that point you're just rendering JSON you already understand.
 
 ---
 

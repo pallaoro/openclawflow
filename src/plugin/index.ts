@@ -2,7 +2,7 @@ import { FlowRunner, sendEvent } from "../core/runner.js";
 import { transpileToCloudflare } from "../core/transpile.js";
 import type { FlowDefinition, PluginConfig } from "../core/types.js";
 
-// ---- OpenClaw Plugin: openclaw-flow ---------------------------------------------
+// ---- OpenClaw Plugin: clawflow ---------------------------------------------------
 // Registers five tools:
 //
 //   flow_run           — execute a flow (inline or from file)
@@ -56,7 +56,7 @@ function register(api: PluginApi) {
   };
 
   api.logger?.info?.(
-    `[openclaw-flow] AI backend: gateway at ${pluginCfg.gatewayUrl}`,
+    `[clawflow] AI backend: gateway at ${pluginCfg.gatewayUrl}`,
   );
 
   const runner = new FlowRunner(pluginCfg);
@@ -67,7 +67,7 @@ function register(api: PluginApi) {
   api.registerTool(
     {
       name: "flow_run",
-      description: `Run an agentic workflow in the openclaw-flow format.
+      description: `Run an agentic workflow in the clawflow format.
 
 Node types:
   ai       — LLM call, structured or freeform. Use schema: for typed output.
@@ -172,7 +172,7 @@ Returns instanceId for status tracking and resume.`,
   api.registerTool(
     {
       name: "flow_resume",
-      description: `Resume a paused openclaw-flow after an approval gate.
+      description: `Resume a paused clawflow after an approval gate.
 Use the instanceId (= resumeToken) from a flow_run result where status was "paused".
 Set approved=true to continue, false to cancel.
 You must pass the original flow definition back so the runner can continue.`,
@@ -367,7 +367,7 @@ Status values: running | completed | paused | waiting | failed | cancelled`,
   api.registerTool(
     {
       name: "flow_transpile",
-      description: `Convert an openclaw-flow definition into a Cloudflare Workers TypeScript class.
+      description: `Convert a clawflow definition into a Cloudflare Workers TypeScript class.
 Output is a complete .ts file you can deploy with: wrangler deploy
 Each node maps to a Cloudflare Workflows primitive:
   ai/agent   → step.do()

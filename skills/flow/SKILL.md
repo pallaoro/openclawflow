@@ -1,9 +1,9 @@
 ---
 name: flow
-description: Design and run declarative agentic workflows using openclaw-flow. Use when the user asks to create a workflow, automation, pipeline, or flow.
+description: Design and run declarative agentic workflows using clawflow. Use when the user asks to create a workflow, automation, pipeline, or flow.
 ---
 
-# openclaw-flow — Workflow Authoring Guide
+# ClawFlow — Workflow Authoring Guide
 
 You have access to the `flow_run` tool. Use it to design and execute declarative workflows from natural language descriptions.
 
