@@ -897,10 +897,13 @@ export class FlowRunner {
     const method = node.method ?? "GET";
     let body: string | undefined;
     if (node.body) {
-      body =
-        typeof node.body === "string"
-          ? this.resolveTemplate(node.body, state)
-          : this.resolveTemplate(JSON.stringify(node.body), state);
+      if (typeof node.body === "string") {
+        body = this.resolveTemplate(node.body, state);
+      } else {
+        // Deep-resolve templates in the body object, preserving types.
+        // This avoids double-encoding when a template resolves to an object/array.
+        body = JSON.stringify(this.resolveBodyObject(node.body, state));
+      }
     }
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -1027,6 +1030,32 @@ export class FlowRunner {
   }
 
   // ---- Template helpers ---------------------------------------------------------
+
+  // Deep-resolve templates in an object, preserving types.
+  // If a value is a pure template like "{{ foo.bar }}" and resolves to an
+  // object/array, the resolved value replaces the string (no double-encoding).
+  private resolveBodyObject(obj: unknown, state: FlowState): unknown {
+    if (typeof obj === "string") {
+      // Check if the entire string is a single template expression
+      const singleMatch = obj.match(/^\{\{\s*([\w.]+)\s*\}\}$/);
+      if (singleMatch) {
+        const val = this.getPath(state, singleMatch[1]);
+        return val !== undefined ? val : obj;
+      }
+      return this.resolveTemplate(obj, state);
+    }
+    if (Array.isArray(obj)) {
+      return obj.map((item) => this.resolveBodyObject(item, state));
+    }
+    if (obj !== null && typeof obj === "object") {
+      const result: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(obj)) {
+        result[k] = this.resolveBodyObject(v, state);
+      }
+      return result;
+    }
+    return obj;
+  }
 
   resolveTemplate(template: string, state: FlowState): string {
     return template.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_m, p: string) => {
