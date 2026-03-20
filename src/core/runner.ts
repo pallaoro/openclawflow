@@ -719,32 +719,46 @@ export class FlowRunner {
       }
     }
 
-    // 3. Extract JSON from mixed text (CLI output with log lines before/after)
-    // Try from the LAST occurrence first — CLI logs often contain stray { }
-    // characters (e.g. "[model-router] v2 registered (keyword + NLI)")
-    // but the actual JSON payload is typically at the end of output.
+    // 3. Extract the largest valid JSON from mixed text.
+    // CLI output has log lines with stray brackets before the real payload.
+    // Strategy: find all candidate { or [ positions, try bracket-matching
+    // each one, keep the longest valid parse.
+    let bestParsed: unknown = null;
+    let bestLength = 0;
+
     for (const bracket of ["{", "["] as const) {
       const closer = bracket === "{" ? "}" : "]";
-      // Try last occurrence first, then first
-      const positions = [text.lastIndexOf(bracket), text.indexOf(bracket)];
-      for (const start of positions) {
-        if (start < 0) continue;
+      let searchFrom = 0;
+      while (searchFrom < text.length) {
+        const start = text.indexOf(bracket, searchFrom);
+        if (start < 0) break;
         let depth = 0;
+        let end = -1;
         for (let i = start; i < text.length; i++) {
           if (text[i] === bracket) depth++;
           else if (text[i] === closer) depth--;
           if (depth === 0) {
+            end = i;
+            break;
+          }
+        }
+        if (end > start) {
+          const candidate = text.slice(start, end + 1);
+          if (candidate.length > bestLength) {
             try {
-              return JSON.parse(text.slice(start, i + 1));
+              const parsed = JSON.parse(candidate);
+              bestParsed = parsed;
+              bestLength = candidate.length;
             } catch {
-              break;
+              // not valid JSON at this position
             }
           }
         }
+        searchFrom = start + 1;
       }
     }
 
-    return value;
+    return bestParsed ?? value;
   }
 
   // ---- do: branch ---------------------------------------------------------------
