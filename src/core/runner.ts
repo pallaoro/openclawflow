@@ -698,20 +698,56 @@ export class FlowRunner {
   private autoParseJson(value: unknown): unknown {
     if (typeof value !== "string") return value;
     const text = (value as string).trim();
-    const clean = text
+
+    // 1. Try the whole string as JSON
+    try {
+      return JSON.parse(text);
+    } catch {
+      // not pure JSON
+    }
+
+    // 2. Try stripping markdown code fences
+    const fenced = text
       .replace(/^```(?:json)?\n?/m, "")
       .replace(/\n?```$/m, "")
       .trim();
-    if (
-      (clean.startsWith("{") && clean.endsWith("}")) ||
-      (clean.startsWith("[") && clean.endsWith("]"))
-    ) {
+    if (fenced !== text) {
       try {
-        return JSON.parse(clean);
+        return JSON.parse(fenced);
       } catch {
-        // Keep as string
+        // not valid
       }
     }
+
+    // 3. Extract the first JSON object or array from mixed text
+    // (handles CLI output with logs/text before or after the JSON)
+    const objStart = text.indexOf("{");
+    const arrStart = text.indexOf("[");
+    const start =
+      objStart >= 0 && arrStart >= 0
+        ? Math.min(objStart, arrStart)
+        : objStart >= 0
+          ? objStart
+          : arrStart;
+
+    if (start >= 0) {
+      const opener = text[start];
+      const closer = opener === "{" ? "}" : "]";
+      // Find matching closer by counting brackets
+      let depth = 0;
+      for (let i = start; i < text.length; i++) {
+        if (text[i] === opener) depth++;
+        else if (text[i] === closer) depth--;
+        if (depth === 0) {
+          try {
+            return JSON.parse(text.slice(start, i + 1));
+          } catch {
+            break;
+          }
+        }
+      }
+    }
+
     return value;
   }
 
