@@ -33,7 +33,10 @@ export class StateStore {
   constructor(stateDir?: string) {
     this.dir =
       stateDir ??
-      path.join(process.env.HOME ?? ".", ".openclaw", "flow-state");
+      path.join(
+        process.env.OPENCLAW_WORKSPACE ?? process.env.HOME ?? ".",
+        "flow-state",
+      );
     fs.mkdirSync(this.dir, { recursive: true });
   }
 

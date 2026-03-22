@@ -998,7 +998,10 @@ export class FlowRunner {
   ): { output: unknown } {
     const dir =
       this.cfg.memoryDir ??
-      path.join(process.env.HOME ?? ".", ".openclaw", "flow-memory");
+      path.join(
+        process.env.OPENCLAW_WORKSPACE ?? process.env.HOME ?? ".",
+        "flow-memory",
+      );
     fs.mkdirSync(dir, { recursive: true });
     const key = this.resolveTemplate(node.key, state).replace(
       /[^a-zA-Z0-9_-]/g,
