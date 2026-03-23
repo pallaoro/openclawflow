@@ -37,7 +37,7 @@ A flow is JSON with a `flow` name and a `nodes` array. Call `flow_run` with the 
 ### Rules
 
 - Every node needs a unique `name`
-- Use `output` to name a node's result — other nodes reference it as `{{ nodeName.field }}`
+- Use `output` to name a node's result — other nodes reference it via the **output key**, NOT the node name: `{{ outputKey.field }}`
 - Always add `schema` to `ai` nodes when downstream nodes need typed fields
 - Use `retry` on `http` and `ai` nodes: `{ "limit": 3, "delay": "2s", "backoff": "exponential" }`
 - Use `do: agent` for tasks that need tools (browser, exec, memory) — delegates to a real OpenClaw agent
@@ -49,13 +49,15 @@ A flow is JSON with a `flow` name and a `nodes` array. Call `flow_run` with the 
 
 ### Templates
 
-Any string field supports `{{ path.to.value }}` interpolation:
+Any string field supports `{{ path.to.value }}` interpolation. The top-level key is always the **`output` field value**, not the node name:
 
 ```
-{{ trigger.body }}           — initial input
-{{ classify.category }}      — output from node named "classify"
-{{ trigger.user.email }}     — nested dotted path
+{{ trigger.body }}              — initial input (trigger is always available)
+{{ classification.category }}   — node with output: "classification" → access .category
+{{ trigger.user.email }}        — nested dotted path from trigger
 ```
+
+**Common mistake:** If a node has `"name": "get_data", "output": "api"`, reference it as `{{ api }}` — NOT `{{ get_data }}`. The node name is just an identifier; the output key is what goes into state.
 
 ### Condition expressions
 

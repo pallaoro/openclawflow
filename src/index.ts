@@ -2,6 +2,8 @@
 export { FlowRunner, sendEvent } from "./core/runner.js";
 export { StateStore } from "./core/store.js";
 export { transpileToCloudflare } from "./core/transpile.js";
+export { validateFlow } from "./core/validate.js";
+export type { ValidationError, ValidationResult } from "./core/validate.js";
 export type {
   FlowDefinition,
   FlowNode,

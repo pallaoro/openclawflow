@@ -27,6 +27,7 @@ import {
   parseDuration,
 } from "./types.js";
 import { StateStore } from "./store.js";
+import { validateFlow } from "./validate.js";
 
 // ---- Event Bus ------------------------------------------------------------------
 // External systems call sendEvent(instanceId, type, payload) to unblock
@@ -94,6 +95,24 @@ export class FlowRunner {
     input: unknown,
     instanceId?: string,
   ): Promise<FlowResult> {
+    // Static validation before execution
+    const validation = validateFlow(flow);
+    if (!validation.ok) {
+      const id = instanceId ?? crypto.randomUUID();
+      const messages = validation.errors.map((e) =>
+        e.node ? `[${e.node}] ${e.message}` : e.message,
+      );
+      return {
+        ok: false,
+        status: "failed",
+        flowName: flow.flow ?? "unknown",
+        instanceId: id,
+        state: { trigger: input },
+        trace: [],
+        error: `Validation failed:\n${messages.join("\n")}`,
+      };
+    }
+
     const id = instanceId ?? crypto.randomUUID();
     const state: FlowState = { trigger: input };
     this.store.create(id, flow.flow, state);

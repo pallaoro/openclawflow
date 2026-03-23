@@ -4,7 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 
-import { FlowRunner, parseDuration, transpileToCloudflare } from "../src/index.js";
+import { FlowRunner, parseDuration, transpileToCloudflare, validateFlow } from "../src/index.js";
 import type { FlowDefinition, PluginConfig } from "../src/index.js";
 
 // Use a temp dir for state so tests don't pollute the real store
@@ -523,5 +523,167 @@ describe("template filters", () => {
       runner.resolveTemplate("Title: {{ plan.title | upper }}!", state),
       "Title: MY PLAN!",
     );
+  });
+});
+
+// ---- validateFlow ---------------------------------------------------------------
+
+describe("validateFlow", () => {
+  it("passes a valid flow", () => {
+    const flow: FlowDefinition = {
+      flow: "valid",
+      nodes: [
+        { name: "step1", do: "code" as const, run: "'hello'", output: "greeting" },
+        { name: "step2", do: "code" as const, run: "input.length", input: "greeting", output: "len" },
+      ],
+    };
+    const result = validateFlow(flow);
+    assert.equal(result.ok, true);
+    assert.equal(result.errors.length, 0);
+  });
+
+  it("catches duplicate node names", () => {
+    const flow: FlowDefinition = {
+      flow: "dupes",
+      nodes: [
+        { name: "step", do: "code" as const, run: "'a'", output: "x" },
+        { name: "step", do: "code" as const, run: "'b'", output: "y" },
+      ],
+    };
+    const result = validateFlow(flow);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.message.includes("Duplicate")));
+  });
+
+  it("catches missing required fields", () => {
+    const flow: FlowDefinition = {
+      flow: "missing-fields",
+      nodes: [
+        { name: "bad-ai", do: "ai" as const, prompt: "" } as any,
+        { name: "bad-http", do: "http" as const, url: "" } as any,
+      ],
+    };
+    const result = validateFlow(flow);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.message.includes("requires")));
+  });
+
+  it("catches template referencing node name instead of output key", () => {
+    const flow: FlowDefinition = {
+      flow: "bad-ref",
+      nodes: [
+        { name: "get_data", do: "http" as const, url: "https://example.com", output: "api" },
+        { name: "use_data", do: "code" as const, run: "'ok'", output: "result" },
+      ],
+    };
+    // This flow is valid — but if someone used {{ get_data.body }} it would fail
+    const result = validateFlow(flow);
+    assert.equal(result.ok, true);
+
+    // Now test with a bad template ref
+    const badFlow: FlowDefinition = {
+      flow: "bad-ref2",
+      nodes: [
+        { name: "get_data", do: "http" as const, url: "https://example.com", output: "api" },
+        {
+          name: "parse", do: "ai" as const,
+          prompt: "Parse this: {{ get_data.body }}",
+          output: "parsed",
+        },
+      ],
+    };
+    const badResult = validateFlow(badFlow);
+    assert.equal(badResult.ok, false);
+    assert.ok(badResult.errors.some((e) => e.message.includes("get_data")));
+  });
+
+  it("catches bad branch on reference", () => {
+    const flow: FlowDefinition = {
+      flow: "bad-branch-on",
+      nodes: [
+        {
+          name: "route", do: "branch" as const, on: "nonexistent.field",
+          paths: {
+            a: [{ name: "path-a", do: "code" as const, run: "'a'", output: "x" }],
+          },
+        },
+      ],
+    };
+    const result = validateFlow(flow);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.message.includes("nonexistent")));
+  });
+
+  it("catches bad condition if reference", () => {
+    const flow: FlowDefinition = {
+      flow: "bad-condition-if",
+      nodes: [
+        {
+          name: "check", do: "condition" as const,
+          if: "missing_var == true",
+          then: [{ name: "action", do: "code" as const, run: "'ok'", output: "x" }],
+        },
+      ],
+    };
+    const result = validateFlow(flow);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.message.includes("missing_var")));
+  });
+
+  it("validates sub-flow template refs inside branch paths", () => {
+    const flow: FlowDefinition = {
+      flow: "branch-subflow-refs",
+      nodes: [
+        { name: "classify", do: "code" as const, run: "'billing'", output: "category" },
+        {
+          name: "route", do: "branch" as const, on: "category",
+          paths: {
+            billing: [
+              { name: "lookup", do: "http" as const, url: "https://example.com", output: "invoice" },
+              { name: "draft", do: "ai" as const, prompt: "Draft for {{ invoice }}", output: "reply" },
+            ],
+          },
+        },
+      ],
+    };
+    const result = validateFlow(flow);
+    assert.equal(result.ok, true);
+  });
+
+  it("runner returns validation error instead of executing", async () => {
+    const flow: FlowDefinition = {
+      flow: "invalid",
+      nodes: [
+        { name: "bad", do: "ai" as const, prompt: "" } as any,
+      ],
+    };
+    const runner = new FlowRunner(cfg);
+    const result = await runner.run(flow, {});
+    assert.equal(result.ok, false);
+    assert.equal(result.status, "failed");
+    assert.ok(result.error?.includes("Validation failed"));
+  });
+
+  it("allows trigger refs without prior nodes", () => {
+    const flow: FlowDefinition = {
+      flow: "trigger-ref",
+      nodes: [
+        { name: "greet", do: "ai" as const, prompt: "Hello {{ trigger.name }}", output: "msg" },
+      ],
+    };
+    const result = validateFlow(flow);
+    assert.equal(result.ok, true);
+  });
+
+  it("catches unknown node type", () => {
+    const flow: FlowDefinition = {
+      flow: "unknown-type",
+      nodes: [
+        { name: "bad", do: "foobar" as any, output: "x" },
+      ],
+    };
+    const result = validateFlow(flow);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.message.includes("Unknown node type")));
   });
 });
