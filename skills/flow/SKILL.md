@@ -45,7 +45,7 @@ A flow is JSON with a `flow` name and a `nodes` array. Call `flow_run` with the 
 - Set `agent: "ops"` on agent nodes to target a specific OpenClaw agent ID
 - `do: wait` with `for: approval` pauses for human review before side effects
 - `do: condition` for boolean if/else, `do: branch` for multi-way value matching — both run inline sub-flows and reconverge
-- Model shorthands: `fast` (Haiku), `smart` (Sonnet), `best` (Opus)
+- Model shorthands: `fast` (Gemini 3 Flash), `smart` (Claude Sonnet 4.6), `best` (Minimax M2.5)
 
 ### Templates
 

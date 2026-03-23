@@ -260,21 +260,21 @@ export interface PluginConfig {
 // ---- Model Shorthands -----------------------------------------------------------
 
 export const MODEL_MAP: Record<string, string> = {
-  fast: "claude-haiku-4-5-20251001",
-  smart: "claude-sonnet-4-6",
-  best: "claude-opus-4-6",
-};
-export const DEFAULT_MODEL = "claude-sonnet-4-6";
-
-// OpenRouter uses provider-prefixed IDs with dots (anthropic/claude-sonnet-4.6).
-// Maps both shorthand aliases and resolved Anthropic model IDs.
-export const OPENROUTER_MODEL_MAP: Record<string, string> = {
-  fast: "anthropic/claude-haiku-4.5",
+  fast: "google/gemini-3-flash-preview",
   smart: "anthropic/claude-sonnet-4.6",
-  best: "anthropic/claude-opus-4.6",
-  "claude-haiku-4-5-20251001": "anthropic/claude-haiku-4.5",
-  "claude-sonnet-4-6": "anthropic/claude-sonnet-4.6",
-  "claude-opus-4-6": "anthropic/claude-opus-4.6",
+  best: "minimax/minimax-m2.5",
+};
+export const DEFAULT_MODEL = "anthropic/claude-sonnet-4.6";
+
+// OpenRouter uses provider-prefixed IDs with dots.
+// Maps both shorthand aliases and resolved model IDs.
+export const OPENROUTER_MODEL_MAP: Record<string, string> = {
+  fast: "google/gemini-3-flash-preview",
+  smart: "anthropic/claude-sonnet-4.6",
+  best: "minimax/minimax-m2.5",
+  "google/gemini-3-flash-preview": "google/gemini-3-flash-preview",
+  "anthropic/claude-sonnet-4.6": "anthropic/claude-sonnet-4.6",
+  "minimax/minimax-m2.5": "minimax/minimax-m2.5",
 };
 
 // ---- Duration Parser ------------------------------------------------------------
