@@ -3,49 +3,80 @@
 </p>
 <div class="markdown-heading" dir="auto"><h1 align="center" tabindex="-1" class="heading-element" dir="auto">ClawFlow</h1><a id="user-content-clawflow" class="anchor" aria-label="Permalink: ClawFlow" href="#clawflow"></a></div>
 
+<p align="center">
+  <a href="https://www.npmjs.com/package/@clawnify/clawflow"><img src="https://img.shields.io/npm/v/@clawnify/clawflow?color=blue" alt="npm"></a>
+  <a href="https://github.com/clawnify/clawflow/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
+  <a href="https://www.reddit.com/r/clawflow/"><img src="https://img.shields.io/badge/reddit-r%2Fclawflow-orange?logo=reddit&logoColor=white" alt="Reddit"></a>
+  <a href="https://www.clawnify.com"><img src="https://img.shields.io/badge/clawnify.com-website-blueviolet" alt="Website"></a>
+</p>
+
 > The n8n for agents. A declarative, AI-native workflow format that agents can read, write, and run — without infrastructure.
 
 ---
 
-## The Problem
+## Install
+
+```bash
+npm install @clawnify/clawflow
+```
+
+Or as an OpenClaw plugin:
+```bash
+openclaw plugins install @clawnify/clawflow
+```
+
+From source:
+```bash
+git clone https://github.com/clawnify/clawflow.git
+cd clawflow && npm install && npm run build
+```
+
+---
+
+## Why ClawFlow
 
 Workflows today are written **for** agents, not **by** them. Visual canvas tools require humans to click nodes. Code-first orchestration frameworks have too much surface area for LLMs to generate reliably.
 
-**What if the agent itself could design, build, and modify the workflow?**
+**ClawFlow is a workflow format designed from first principles for agents.** Three rules drove every design decision:
+
+1. **An LLM must be able to write a valid workflow in a single turn.** If the format is too complex, agents hallucinate. If it's too simple, real workflows can't be expressed.
+
+2. **The format is the asset, not the runtime.** Write once, run as an OpenClaw plugin today, deploy to Cloudflare Workers tomorrow, run in a standalone server next month.
+
+3. **AI nodes are first-class citizens.** `do: ai` and `do: agent` are core primitives with structured output, model selection, and schema validation — not HTTP calls with extra steps.
 
 ---
 
-## The Vision
+## Features
 
-**`clawflow` is a workflow format designed from first principles for agents.**
+### AI-Native
+- **`do: ai`** — structured LLM calls with schema validation and model selection (`fast`, `smart`, `best`)
+- **`do: agent`** — delegate to real agents with full tool access (browser, exec, memory)
+- **Agent-writable** — any LLM can generate a valid flow from a natural language description
 
-Three rules drove every design decision:
+### Control Flow
+- **`do: branch`** — multi-way routing with inline sub-flows per path
+- **`do: condition`** — if/else with automatic reconvergence
+- **`do: loop`** — iterate over arrays
+- **`do: parallel`** — concurrent execution with `all` or `race` modes
 
-1. **An LLM must be able to write a valid workflow from a natural language description in a single turn.** If the format is too complex, agents hallucinate structure. If it's too simple, real workflows can't be expressed.
+### Durability
+- **Memoized state** — completed nodes aren't re-run on resume
+- **Approval gates** — `do: wait` pauses for human review, resumes with a token
+- **External events** — `waitForEvent` blocks until an external system pushes data
+- **Per-node retry** — exponential, linear, or constant backoff on any node
 
-2. **The format is the asset, not the runtime.** Write once, run as an OpenClaw plugin today, deploy to Cloudflare Workers tomorrow, run in a standalone server next month. The spec outlives any particular runtime.
-
-3. **AI nodes are first-class citizens, not HTTP calls with extra steps.** Every other workflow tool treats AI as just another integration. Here, `do: ai` and `do: agent` are core primitives with their own semantics: structured output, model selection, schema validation.
+### Portability
+- **OpenClaw plugin** — run flows as agent tools today
+- **Cloudflare transpiler** — convert to `WorkflowEntrypoint` TypeScript
+- **Standalone runner** — self-hosted Node.js server (coming soon)
+- **Static validation** — catch bad references and missing fields before execution
 
 ---
 
-## What We're Building
+## Quick Example
 
-```
-clawflow/
-│
-├── Format Spec         The .flow JSON/YAML definition language
-├── OpenClaw Plugin     Run flows inside OpenClaw as agent tools (today)
-├── Cloudflare Runtime  Transpile flows to Workers + Durable Objects (next)
-├── Standalone Runner   Node.js server for self-hosted deployment
-└── Flow Registry       Shareable, reusable community flow library
-```
-
----
-
-## The Format
-
-A flow is a JSON (or YAML) document. No custom syntax, no new language — just structured data that any LLM can generate from a description.
+A flow is JSON. No custom syntax, no new language — just structured data that any LLM can generate from a description.
 
 ```json
 {
@@ -122,7 +153,7 @@ A flow is a JSON (or YAML) document. No custom syntax, no new language — just 
 
 ## Node Types
 
-10 node types. This is intentional — the constraint is the feature. An LLM can reliably generate valid flows because there's nothing to hallucinate.
+11 node types. This is intentional — the constraint is the feature. An LLM can reliably generate valid flows because there's nothing to hallucinate.
 
 ### `do: ai` — LLM call
 
@@ -409,10 +440,12 @@ Any string field supports `{{ path.to.value }}` interpolation resolved against f
 
 ```
 {{ trigger.body }}              # initial input
-{{ classify.category }}         # output from node named "classify"
+{{ classification.category }}   # node with output: "classification" → access .category
 {{ trigger.user.email }}        # nested dotted path
 {{ research.web_results }}      # array or object (serialized to JSON string)
 ```
+
+**Important:** templates reference the **`output` key**, not the node name. If a node has `"name": "get_data", "output": "api"`, reference it as `{{ api }}` — not `{{ get_data }}`.
 
 Flow state starts as `{ trigger: <input> }` and grows as nodes complete.
 
@@ -471,16 +504,6 @@ Five tools registered in OpenClaw:
 | `flow_send_event` | Push an event into a waiting flow |
 | `flow_status` | Inspect any running or completed instance |
 | `flow_transpile` | Convert a flow to Cloudflare Workers TypeScript |
-
-**Install:**
-```bash
-npm install @clawnify/clawflow
-```
-
-**Or as an OpenClaw plugin:**
-```bash
-openclaw plugins install @clawnify/clawflow
-```
 
 **Config:**
 ```json
@@ -590,11 +613,11 @@ Add this to a skill or system prompt to enable an agent to write flows:
 You can design and run workflows using flow_run.
 Flows are JSON with a "flow" name and "nodes" array.
 
-Node types: ai, agent, branch, loop, parallel, http, memory, wait, sleep, code
+Node types: ai, agent, branch, condition, loop, parallel, http, memory, wait, sleep, code
 
 Rules:
 - Every node needs a unique "name"
-- Use "output" to name a node's result — other nodes reference it as {{ nodeName.field }}
+- Use "output" to name a node's result — other nodes reference it via the output key: {{ outputKey.field }}
 - Always add "schema" to ai nodes when downstream nodes need typed fields
 - Use "retry" on all http nodes: { "limit": 3, "delay": "2s", "backoff": "exponential" }
 - Use "do: agent" for open-ended research/tasks, "do: ai" for structured extraction
@@ -605,17 +628,22 @@ Rules:
 
 ---
 
-## What's Shipped (v0.2)
+## Comparison
 
-- 11 node types: ai, agent, branch, condition, loop, parallel, http, memory, wait, sleep, code
-- Static flow validation before execution
-- `do: agent` delegates to real OpenClaw agents
-- `do: branch` and `do: condition` with inline sub-flows and automatic reconvergence
-- Per-node retry with exponential/linear/constant backoff
-- `waitForEvent` — external systems push events into waiting flows
-- Durable state: memoized node outputs persist across restarts
-- Cloudflare transpiler — convert flows to `WorkflowEntrypoint` TypeScript
-- Plugin ships a skill (SKILL.md) so agents know how to write flows
+|  | Visual canvas tools | Code-first orchestration | ClawFlow |
+|---|---|---|---|
+| AI nodes first-class | ✗ | partial | ✓ |
+| Agent delegation | ✗ | partial | ✓ |
+| LLM can write it | ✗ | ✗ | ✓ |
+| Human readable | ✓ | ✗ | ✓ |
+| Durable execution | ✗ | ✓ | ✓ |
+| Per-step retry | ✓ | ✓ | ✓ |
+| waitForEvent | ✗ | ✓ | ✓ |
+| Parallel branches | ✓ | ✓ | ✓ |
+| Runtime portable | ✗ | ✗ | ✓ |
+| Self-hostable | ✓ | ✗ | ✓ |
+
+---
 
 ## What's Next
 
