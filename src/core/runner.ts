@@ -644,7 +644,7 @@ export class FlowRunner {
 
   // ---- do: agent ----------------------------------------------------------------
   // Delegates to a real OpenClaw agent via CLI. The agent gets full tool access
-  // (browser, exec, memory, etc.). Falls back to AI call if CLI unavailable.
+  // (browser, exec, memory, MCP, CLI). Falls back to AI call if CLI unavailable.
 
   private async execAgent(
     node: AgentNode,

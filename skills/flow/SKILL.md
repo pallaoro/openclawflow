@@ -40,7 +40,7 @@ A flow is JSON with a `flow` name and a `nodes` array. Call `flow_run` with the 
 - Use `output` to name a node's result — other nodes reference it via the **output key**, NOT the node name: `{{ outputKey.field }}`
 - Always add `schema` to `ai` nodes when downstream nodes need typed fields
 - Use `retry` on `http` and `ai` nodes: `{ "limit": 3, "delay": "2s", "backoff": "exponential" }`
-- Use `do: agent` for tasks that need tools (browser, exec, memory) — delegates to a real OpenClaw agent
+- Use `do: agent` for tasks that need tools (browser, exec, memory, MCP, CLI) — delegates to a real OpenClaw agent
 - Use `do: ai` for structured extraction and single-turn LLM calls
 - Set `agent: "ops"` on agent nodes to target a specific OpenClaw agent ID
 - `do: wait` with `for: approval` pauses for human review before side effects
