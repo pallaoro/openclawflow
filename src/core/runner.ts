@@ -898,7 +898,9 @@ export class FlowRunner {
     flow: FlowDefinition,
     instanceId: string,
   ): Promise<{ output: unknown[] }> {
-    const items = this.getPath(state, node.over);
+    // Support both plain dotted paths ("plan.sections") and template syntax ("{{ plan.sections }}")
+    const resolved = this.resolveBodyObject(node.over, state);
+    const items = typeof resolved === "string" ? this.getPath(state, resolved) : resolved;
     if (!Array.isArray(items))
       throw new Error(`loop "${node.name}": "${node.over}" is not an array`);
 
@@ -1112,7 +1114,9 @@ export class FlowRunner {
   // ---- do: code -----------------------------------------------------------------
 
   private execCode(node: CodeNode, state: FlowState): { output: unknown } {
-    const input = node.input ? this.getPath(state, node.input) : undefined;
+    // Support both plain dotted paths ("plan.field") and template syntax ("{{ plan.field }}")
+    const rawInput = node.input ? this.resolveBodyObject(node.input, state) : undefined;
+    const input = typeof rawInput === "string" ? this.getPath(state, rawInput) : rawInput;
     // eslint-disable-next-line no-new-func
     const fn = new Function(
       "input",

@@ -313,7 +313,9 @@ function checkStateRefs(
 
   if (node.do === "loop") {
     const n = node as LoopNode;
-    const rootKey = n.over?.split(".")[0];
+    // Strip {{ }} template wrapper if present, then extract the root key
+    const overPath = n.over?.replace(/^\{\{\s*([\w.]+)\s*\}\}$/, "$1");
+    const rootKey = overPath?.split(".")[0];
     if (rootKey && !available.has(rootKey)) {
       errors.push({
         node: node.name,
