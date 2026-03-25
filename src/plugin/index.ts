@@ -121,9 +121,11 @@ Returns instanceId for status tracking and resume.`,
 
         if (params.file) {
           const { readFileSync, existsSync } = await import("fs");
+          const base =
+            process.env.OPENCLAW_WORKSPACE ?? process.cwd();
           const abs = params.file.startsWith("/")
             ? params.file
-            : `${process.cwd()}/${params.file}`;
+            : `${base}/${params.file}`;
           if (!existsSync(abs))
             return {
               content: [{ type: "text", text: `File not found: ${abs}` }],

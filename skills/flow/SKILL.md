@@ -57,6 +57,16 @@ Any string field supports `{{ path.to.value }}` interpolation. The top-level key
 {{ trigger.user.email }}        — nested dotted path from trigger
 ```
 
+**Filters:** Use `{{ value | filter }}` to transform values inline:
+
+| Filter | Effect |
+|--------|--------|
+| `tojson` | Serialize object/array to JSON string |
+| `upper` | Uppercase |
+| `lower` | Lowercase |
+| `trim` | Strip whitespace |
+| `length` | Array/string/object length |
+
 **Common mistake:** If a node has `"name": "get_data", "output": "api"`, reference it as `{{ api }}` — NOT `{{ get_data }}`. The node name is just an identifier; the output key is what goes into state.
 
 ### Condition expressions
@@ -95,6 +105,18 @@ Call with:
 
 ```
 flow_run with flow: <above JSON>, input: { "topic": "AI agents replacing SaaS" }
+```
+
+## Saving flows for reuse
+
+When the user wants to save a flow for later use, write it to `flows/<flow-name>.json` in the workspace. File paths in `flow_run` resolve relative to `OPENCLAW_WORKSPACE`.
+
+```
+# Save
+Write the flow JSON to flows/linkedin-post.json
+
+# Run later
+flow_run with file: "flows/linkedin-post.json", input: { "topic": "..." }
 ```
 
 ## Example: Multi-step with approval
