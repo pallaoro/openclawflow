@@ -23,7 +23,13 @@
     "prepublishOnly": "npm run build"
   },
   "openclaw": {
-    "extensions": ["./index.ts"]
+    "extensions": ["./index.ts"],
+    "compat": {
+      "pluginApi": "^1.0.0"
+    },
+    "build": {
+      "openclawVersion": "2026.3.24"
+    }
   },
   "files": [
     "dist/**/*.js",
