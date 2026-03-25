@@ -1,6 +1,6 @@
 {
   "name": "@clawnify/clawflow",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "The n8n for agents. A declarative, AI-native workflow format that agents can read, write, and run.",
   "type": "module",
   "main": "./dist/index.js",
