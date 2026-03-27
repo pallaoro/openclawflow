@@ -1185,6 +1185,15 @@ export class FlowRunner {
         if (val === undefined) return obj;
         return singleMatch[2] ? applyFilter(val, singleMatch[2]) : val;
       }
+      // Check for wildcard: {{ path[*].field }}
+      const wildcardMatch = obj.match(/^\{\{\s*([\w.]+)\[\*\](?:\.([\w.]+))?\s*\}\}$/);
+      if (wildcardMatch) {
+        const arr = this.getPath(state, wildcardMatch[1]);
+        if (!Array.isArray(arr)) return obj;
+        return wildcardMatch[2]
+          ? arr.map((item: unknown) => this.getPath(item, wildcardMatch[2]))
+          : arr;
+      }
       return this.resolveTemplate(obj, state);
     }
     if (Array.isArray(obj)) {
@@ -1201,12 +1210,76 @@ export class FlowRunner {
   }
 
   resolveTemplate(template: string, state: FlowState): string {
-    return template.replace(/\{\{\s*([\w.]+)\s*(?:\|\s*(\w+))?\s*\}\}/g, (_m, p: string, filter?: string) => {
+    // Pass 1: ternary expressions  {{ expr ? val1 : val2 }}
+    // Supports: ==, !=, >, <, >=, <=  with string or number literals
+    let result = template.replace(
+      /\{\{\s*(.+?)\s*\?\s*(.+?)\s*:\s*(.+?)\s*\}\}/g,
+      (_m, condExpr: string, thenExpr: string, elseExpr: string) => {
+        const condResult = this.evalTemplateCondition(condExpr.trim(), state);
+        const chosen = condResult ? thenExpr.trim() : elseExpr.trim();
+        // Chosen value: strip surrounding quotes if it's a string literal
+        const unquoted = chosen.replace(/^['"](.*)['"]$/, "$1");
+        if (unquoted !== chosen) return unquoted;
+        // Otherwise resolve as a path
+        const val = this.getPath(state, chosen);
+        return val !== undefined
+          ? (typeof val === "object" ? JSON.stringify(val) : String(val))
+          : chosen;
+      },
+    );
+
+    // Pass 2: wildcard  {{ path[*].field }}
+    result = result.replace(
+      /\{\{\s*([\w.]+)\[\*\](?:\.([\w.]+))?\s*\}\}/g,
+      (_m, arrPath: string, field?: string) => {
+        const arr = this.getPath(state, arrPath);
+        if (!Array.isArray(arr)) return `{{${arrPath}[*]${field ? "." + field : ""}}}`;
+        const mapped = field ? arr.map((item: unknown) => this.getPath(item, field)) : arr;
+        return JSON.stringify(mapped);
+      },
+    );
+
+    // Pass 3: simple path + optional filter  {{ path | filter }}
+    result = result.replace(/\{\{\s*([\w.]+)\s*(?:\|\s*(\w+))?\s*\}\}/g, (_m, p: string, filter?: string) => {
       const val = this.getPath(state, p);
       if (val === undefined) return `{{${p}}}`;
       if (filter) return String(applyFilter(val, filter));
       return typeof val === "object" ? JSON.stringify(val) : String(val);
     });
+
+    return result;
+  }
+
+  /** Evaluate a simple condition expression for ternary templates */
+  private evalTemplateCondition(expr: string, state: FlowState): boolean {
+    // Match: path op value  (e.g. sheet.type == 'diametri')
+    const m = expr.match(/^([\w.]+)\s*(==|!=|>=?|<=?)\s*(.+)$/);
+    if (!m) {
+      // Bare truthy check: {{ flag ? 'yes' : 'no' }}
+      const val = this.getPath(state, expr);
+      return !!val;
+    }
+    const [, pathStr, op, rawRight] = m;
+    const left = this.getPath(state, pathStr.trim());
+    // Parse right side: string literal or number or path
+    let right: unknown;
+    const strMatch = rawRight.trim().match(/^['"](.*)['"]$/);
+    if (strMatch) {
+      right = strMatch[1];
+    } else if (!isNaN(Number(rawRight.trim()))) {
+      right = Number(rawRight.trim());
+    } else {
+      right = this.getPath(state, rawRight.trim());
+    }
+    switch (op) {
+      case "==": return left == right;
+      case "!=": return left != right;
+      case ">": return (left as number) > (right as number);
+      case "<": return (left as number) < (right as number);
+      case ">=": return (left as number) >= (right as number);
+      case "<=": return (left as number) <= (right as number);
+      default: return false;
+    }
   }
 
   getPath(obj: unknown, dotPath: string): unknown {

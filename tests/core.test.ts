@@ -333,6 +333,26 @@ describe("FlowRunner — loop node", () => {
     assert.equal(results[0].transformed, "A");
     assert.equal(results[2].transformed, "C");
   });
+
+  it("wildcard collects loop outputs for downstream nodes", async () => {
+    const flow: FlowDefinition = {
+      flow: "test-loop-wildcard",
+      nodes: [
+        {
+          name: "process_sheets", do: "loop" as const, over: "trigger.sheets", as: "sheet",
+          nodes: [
+            { name: "build-path", do: "code" as const, run: "`/output/foglio_${state.sheet.type}.pdf`", output: "pdfPath" },
+          ],
+          output: "process_sheets",
+        },
+        { name: "collect", do: "code" as const, run: "state.process_sheets.map(s => s.pdfPath)", output: "allPaths" },
+      ],
+    };
+    const runner = new FlowRunner(cfg);
+    const result = await runner.run(flow, { sheets: [{ type: "densita" }, { type: "diametri" }] });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.state.allPaths, ["/output/foglio_densita.pdf", "/output/foglio_diametri.pdf"]);
+  });
 });
 
 // ---- FlowRunner: parallel node --------------------------------------------------
@@ -605,6 +625,80 @@ describe("template filters", () => {
       runner.resolveTemplate("Title: {{ plan.title | upper }}!", state),
       "Title: MY PLAN!",
     );
+  });
+
+  // ---- Ternary expressions ----
+
+  it("ternary with string equality (true branch)", () => {
+    const s = { ...state, sheet: { type: "diametri" } };
+    assert.equal(
+      runner.resolveTemplate("{{ sheet.type == 'diametri' ? '_diametri' : '' }}", s),
+      "_diametri",
+    );
+  });
+
+  it("ternary with string equality (false branch)", () => {
+    const s = { ...state, sheet: { type: "densita" } };
+    assert.equal(
+      runner.resolveTemplate("{{ sheet.type == 'diametri' ? '_diametri' : '' }}", s),
+      "",
+    );
+  });
+
+  it("ternary with != operator", () => {
+    const s = { ...state, sheet: { type: "densita" } };
+    assert.equal(
+      runner.resolveTemplate("{{ sheet.type != 'diametri' ? 'other' : 'match' }}", s),
+      "other",
+    );
+  });
+
+  it("ternary with numeric comparison", () => {
+    assert.equal(
+      runner.resolveTemplate("{{ data.count > 10 ? 'big' : 'small' }}", state),
+      "big",
+    );
+  });
+
+  it("ternary with bare truthy check", () => {
+    const s = { ...state, flag: true };
+    assert.equal(runner.resolveTemplate("{{ flag ? 'yes' : 'no' }}", s), "yes");
+    const s2 = { ...state, flag: false };
+    assert.equal(runner.resolveTemplate("{{ flag ? 'yes' : 'no' }}", s2), "no");
+  });
+
+  it("ternary in mixed text", () => {
+    const s = { ...state, sheet: { type: "diametri" } };
+    assert.equal(
+      runner.resolveTemplate("script{{ sheet.type == 'diametri' ? '_diametri' : '' }}.py", s),
+      "script_diametri.py",
+    );
+  });
+
+  // ---- Wildcard [*] ----
+
+  it("wildcard collects field from array", () => {
+    const s = {
+      ...state,
+      results: [
+        { pdfPath: "/a.pdf", other: 1 },
+        { pdfPath: "/b.pdf", other: 2 },
+        { pdfPath: "/c.pdf", other: 3 },
+      ],
+    };
+    assert.equal(
+      runner.resolveTemplate("{{ results[*].pdfPath }}", s),
+      JSON.stringify(["/a.pdf", "/b.pdf", "/c.pdf"]),
+    );
+  });
+
+  it("wildcard without field returns full array", () => {
+    const s = { ...state, items: [1, 2, 3] };
+    assert.equal(runner.resolveTemplate("{{ items[*] }}", s), "[1,2,3]");
+  });
+
+  it("wildcard preserves unresolved when not array", () => {
+    assert.equal(runner.resolveTemplate("{{ plan.title[*].x }}", state), "{{plan.title[*].x}}");
   });
 });
 

@@ -255,20 +255,44 @@ function checkTemplateRefs(
   errors: ValidationError[],
 ): void {
   const strings = collectStringFields(node);
+  // Simple path + optional filter
   const templatePattern = /\{\{\s*([\w.]+)\s*(?:\|\s*\w+)?\s*\}\}/g;
+  // Wildcard: {{ path[*].field }}
+  const wildcardPattern = /\{\{\s*([\w.]+)\[\*\](?:\.([\w.]+))?\s*\}\}/g;
+  // Ternary: {{ expr ? val : val }} — extract dotted paths from condition
+  const ternaryPattern = /\{\{\s*(.+?)\s*\?\s*(.+?)\s*:\s*(.+?)\s*\}\}/g;
+
+  const checkRoot = (ref: string, field: string) => {
+    const rootKey = ref.split(".")[0];
+    if (!available.has(rootKey)) {
+      errors.push({
+        node: node.name,
+        field,
+        message: `Template "{{ ${ref} }}" references "${rootKey}" which is not an available output key. Available: ${[...available].sort().join(", ")}`,
+      });
+    }
+  };
 
   for (const { field, value } of strings) {
+    // Check ternaries
     let match;
-    while ((match = templatePattern.exec(value)) !== null) {
-      const ref = match[1];
-      const rootKey = ref.split(".")[0];
-      if (!available.has(rootKey)) {
-        errors.push({
-          node: node.name,
-          field,
-          message: `Template "{{ ${ref} }}" references "${rootKey}" which is not an available output key. Available: ${[...available].sort().join(", ")}`,
-        });
+    while ((match = ternaryPattern.exec(value)) !== null) {
+      // Extract paths from condition part (e.g. "sheet.type == 'foo'" -> "sheet.type")
+      const condPaths = match[1].match(/[\w.]+/g) ?? [];
+      for (const p of condPaths) {
+        // Skip string literals, numbers, and comparison operators
+        if (/^['"]/.test(p) || /^\d/.test(p) || /^(true|false|null|undefined)$/.test(p)) continue;
+        checkRoot(p, field);
       }
+    }
+    // Check wildcards
+    while ((match = wildcardPattern.exec(value)) !== null) {
+      checkRoot(match[1], field);
+    }
+    // Check simple paths (reset lastIndex)
+    templatePattern.lastIndex = 0;
+    while ((match = templatePattern.exec(value)) !== null) {
+      checkRoot(match[1], field);
     }
   }
 }

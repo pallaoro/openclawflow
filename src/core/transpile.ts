@@ -59,15 +59,65 @@ function applyFilter(val: unknown, filter: string): unknown {
   }
 }
 
-// Template resolver
+// Resolve a dotted path against state
+function getPath(obj: unknown, dotPath: string): unknown {
+  return dotPath.split(".").reduce((o: unknown, k: string) =>
+    o != null && typeof o === "object" ? (o as Record<string, unknown>)[k] : undefined, obj);
+}
+
+// Evaluate a simple condition for ternary templates
+function evalTernaryCondition(state: Record<string, unknown>, expr: string): boolean {
+  const m = expr.match(/^([\\w.]+)\\s*(==|!=|>=?|<=?)\\s*(.+)$/);
+  if (!m) return !!getPath(state, expr);
+  const left = getPath(state, m[1].trim());
+  const rawRight = m[3].trim();
+  const strMatch = rawRight.match(/^['"](.*)['"]$/);
+  let right: unknown;
+  if (strMatch) right = strMatch[1];
+  else if (!isNaN(Number(rawRight))) right = Number(rawRight);
+  else right = getPath(state, rawRight);
+  switch (m[2]) {
+    case "==": return left == right;
+    case "!=": return left != right;
+    case ">": return (left as number) > (right as number);
+    case "<": return (left as number) < (right as number);
+    case ">=": return (left as number) >= (right as number);
+    case "<=": return (left as number) <= (right as number);
+    default: return false;
+  }
+}
+
+// Template resolver with ternary and wildcard support
 function resolveTemplate(state: Record<string, unknown>, template: string): string {
-  return template.replace(/\\{\\{\\s*([\\w.]+)\\s*(?:\\|\\s*(\\w+))?\\s*\\}\\}/g, (_: string, path: string, filter?: string) => {
-    const val = path.split(".").reduce((o: unknown, k: string) =>
-      o != null && typeof o === "object" ? (o as Record<string, unknown>)[k] : undefined, state);
+  // Pass 1: ternary  {{ expr ? val1 : val2 }}
+  let result = template.replace(
+    /\\{\\{\\s*(.+?)\\s*\\?\\s*(.+?)\\s*:\\s*(.+?)\\s*\\}\\}/g,
+    (_: string, cond: string, then_: string, else_: string) => {
+      const chosen = evalTernaryCondition(state, cond.trim()) ? then_.trim() : else_.trim();
+      const unquoted = chosen.replace(/^['"](.*)['"]$/, "$1");
+      if (unquoted !== chosen) return unquoted;
+      const val = getPath(state, chosen);
+      return val !== undefined ? (typeof val === "object" ? JSON.stringify(val) : String(val)) : chosen;
+    },
+  );
+  // Pass 2: wildcard  {{ path[*].field }}
+  result = result.replace(
+    /\\{\\{\\s*([\\w.]+)\\[\\*\\](?:\\.([\\w.]+))?\\s*\\}\\}/g,
+    (_: string, arrPath: string, field?: string) => {
+      const arr = getPath(state, arrPath);
+      if (!Array.isArray(arr)) return \`{{\${arrPath}[*]\${field ? "." + field : ""}}}\`;
+      const mapped = field ? arr.map((item: unknown) => getPath(item, field)) : arr;
+      return JSON.stringify(mapped);
+    },
+  );
+  // Pass 3: simple  {{ path | filter }}
+  result = result.replace(/\\{\\{\\s*([\\w.]+)\\s*(?:\\|\\s*(\\w+))?\\s*\\}\\}/g, (_: string, path: string, filter?: string) => {
+    const val = getPath(state, path);
     if (val === undefined) return \`{{\${path}}}\`;
     if (filter) return String(applyFilter(val, filter));
     return typeof val === "object" ? JSON.stringify(val) : String(val);
   });
+  return result;
 }
 
 export class ${className} extends WorkflowEntrypoint<Env, Params> {
