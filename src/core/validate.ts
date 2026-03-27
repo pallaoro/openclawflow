@@ -274,24 +274,31 @@ function checkTemplateRefs(
   };
 
   for (const { field, value } of strings) {
-    // Check ternaries
+    let remaining = value;
     let match;
+
+    // Check ternaries and remove them from remaining
     while ((match = ternaryPattern.exec(value)) !== null) {
-      // Extract paths from condition part (e.g. "sheet.type == 'foo'" -> "sheet.type")
-      const condPaths = match[1].match(/[\w.]+/g) ?? [];
+      // Extract paths from condition part, stripping string literals first
+      const condCleaned = match[1].replace(/'[^']*'|"[^"]*"/g, "");
+      const condPaths = condCleaned.match(/[\w.]+/g) ?? [];
       for (const p of condPaths) {
-        // Skip string literals, numbers, and comparison operators
-        if (/^['"]/.test(p) || /^\d/.test(p) || /^(true|false|null|undefined)$/.test(p)) continue;
+        if (/^\d/.test(p) || /^(true|false|null|undefined)$/.test(p)) continue;
         checkRoot(p, field);
       }
+      remaining = remaining.replace(match[0], "");
     }
-    // Check wildcards
-    while ((match = wildcardPattern.exec(value)) !== null) {
+
+    // Check wildcards and remove them from remaining
+    wildcardPattern.lastIndex = 0;
+    while ((match = wildcardPattern.exec(remaining)) !== null) {
       checkRoot(match[1], field);
     }
-    // Check simple paths (reset lastIndex)
+    remaining = remaining.replace(wildcardPattern, "");
+
+    // Check simple paths on what's left
     templatePattern.lastIndex = 0;
-    while ((match = templatePattern.exec(value)) !== null) {
+    while ((match = templatePattern.exec(remaining)) !== null) {
       checkRoot(match[1], field);
     }
   }

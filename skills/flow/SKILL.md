@@ -18,12 +18,13 @@ You have access to the `flow_run` tool. Use it to design and execute declarative
 
 A flow is JSON with a `flow` name and a `nodes` array. Call `flow_run` with the flow inline or from a file.
 
-### Node types (10 total)
+### Node types (11 total)
 
 | Node | Purpose | Key fields |
 |------|---------|------------|
 | `ai` | Single LLM call, structured or freeform | `prompt`, `schema`, `model`, `input` |
 | `agent` | Delegate to a real OpenClaw agent (with tools, browser, etc.) | `task`, `agent`, `tools`, `model` |
+| `exec` | Run a shell command deterministically (no AI) | `command`, `cwd` |
 | `branch` | Multi-way routing with inline sub-flows per path | `on`, `paths`, `default` |
 | `condition` | If/else with sub-node blocks that reconverge | `if`, `then`, `else` |
 | `loop` | Iterate over an array | `over`, `as`, `nodes` |
@@ -38,8 +39,10 @@ A flow is JSON with a `flow` name and a `nodes` array. Call `flow_run` with the 
 
 - Every node needs a unique `name`
 - Use `output` to name a node's result — other nodes reference it via the **output key**, NOT the node name: `{{ outputKey.field }}`
+- **CRITICAL: `output` is required to store a node's result in state.** Without it, the result is discarded. This applies to ALL nodes including `loop`, `branch`, `parallel`, `condition`. If a downstream node references a result, the producing node MUST have `output`.
 - Always add `schema` to `ai` nodes when downstream nodes need typed fields
 - Use `retry` on `http` and `ai` nodes: `{ "limit": 3, "delay": "2s", "backoff": "exponential" }`
+- Use `do: exec` for deterministic operations (scripts, file processing, CLI tools) — never use `do: agent` for pure shell commands
 - Use `do: agent` for tasks that need tools (browser, exec, memory, MCP, CLI) — delegates to a real OpenClaw agent
 - Use `do: ai` for structured extraction and single-turn LLM calls
 - Set `agent: "ops"` on agent nodes to target a specific OpenClaw agent ID
@@ -61,13 +64,87 @@ Any string field supports `{{ path.to.value }}` interpolation. The top-level key
 
 | Filter | Effect |
 |--------|--------|
-| `tojson` | Serialize object/array to JSON string |
+| `json` | Serialize object/array to JSON string (alias: `tojson`) |
 | `upper` | Uppercase |
 | `lower` | Lowercase |
 | `trim` | Strip whitespace |
 | `length` | Array/string/object length |
 
+**Ternary expressions:** Use `{{ expr ? val1 : val2 }}` for inline conditionals:
+
+```
+{{ sheet.type == 'diametri' ? '_diametri' : '' }}
+{{ count > 10 ? 'many' : 'few' }}
+{{ flag ? 'yes' : 'no' }}
+```
+
+Supported operators: `==`, `!=`, `>`, `<`, `>=`, `<=`. Bare paths evaluate as truthy/falsy.
+
+**Wildcard `[*]`:** Collect a field from all items in an array:
+
+```
+{{ results[*].pdfPath }}     → ["/a.pdf", "/b.pdf", "/c.pdf"]
+{{ results[*] }}             → full array
+```
+
 **Common mistake:** If a node has `"name": "get_data", "output": "api"`, reference it as `{{ api }}` — NOT `{{ get_data }}`. The node name is just an identifier; the output key is what goes into state.
+
+### do: exec — deterministic shell execution
+
+Runs a command with no AI involved. Returns `{ stdout, stderr, exitCode }`. Non-zero exit codes are captured, not thrown.
+
+```json
+{
+  "name": "build-pdf",
+  "do": "exec",
+  "command": "python3 /path/script.py '{{ pdfPath }}' '{{ data | json }}'",
+  "output": "buildResult"
+}
+```
+
+- Use `| json` filter to pass objects as JSON strings to scripts
+- Optional `cwd` field for working directory
+- Both `command` and `cwd` support template resolution
+- Use ternary for conditional script selection: `"command": "python3 script{{ type == 'special' ? '_special' : '' }}.py"`
+
+### do: loop — iterating with output
+
+**IMPORTANT:** Always add `output` on loop nodes when downstream nodes need the results.
+
+```json
+{
+  "name": "process_sheets",
+  "do": "loop",
+  "over": "parsed.sheets",
+  "as": "sheet",
+  "output": "process_sheets",
+  "nodes": [
+    {
+      "name": "build_path",
+      "do": "code",
+      "run": "`/output/foglio_${state.sheet.type}.pdf`",
+      "output": "pdfPath"
+    },
+    {
+      "name": "run_script",
+      "do": "exec",
+      "command": "python3 /path/fill.py '{{ pdfPath }}' '{{ sheet | json }}'",
+      "output": "buildResult"
+    }
+  ]
+}
+```
+
+Inside loop nodes, the loop variable (`sheet` from `as: "sheet"`) is accessible:
+- In templates: `{{ sheet.type }}`, `{{ sheet | json }}`
+- In ternaries: `{{ sheet.type == 'x' ? 'a' : 'b' }}`
+- In code `run` expressions: `state.sheet.type`
+- Via `input`: `"input": "sheet"` → use `input.type` in `run`
+
+Loop output is an array of sub-states. Use wildcard to extract specific fields:
+```
+{{ process_sheets[*].pdfPath }}  → ["/output/a.pdf", "/output/b.pdf"]
+```
 
 ### Condition expressions
 
@@ -77,6 +154,17 @@ The `if` field in condition nodes supports JS expressions with dotted paths:
 "extractOrder.transport_type == 'CLIENTE'"
 "validation.valid && items.length > 0"
 "trigger.priority == 'high' || trigger.urgent == true"
+```
+
+### Design principle: AI at the edges, determinism at the center
+
+Prefer deterministic nodes (`exec`, `code`, `http`) for operations that don't need intelligence. Use `agent`/`ai` only where judgment or language understanding is needed:
+
+```
+extract (agent) → parse (ai+schema) → loop:
+  ├─ code: build output path
+  ├─ exec: run script with {{ data | json }}
+→ email (agent with {{ results[*].field }})
 ```
 
 ## Example: LinkedIn post generator
@@ -99,24 +187,6 @@ The `if` field in condition nodes supports JS expressions with dotted paths:
     }
   ]
 }
-```
-
-Call with:
-
-```
-flow_run with flow: <above JSON>, input: { "topic": "AI agents replacing SaaS" }
-```
-
-## Saving flows for reuse
-
-When the user wants to save a flow for later use, write it to `flows/<flow-name>.json` in the workspace. File paths in `flow_run` resolve relative to `OPENCLAW_WORKSPACE`.
-
-```
-# Save
-Write the flow JSON to flows/linkedin-post.json
-
-# Run later
-flow_run with file: "flows/linkedin-post.json", input: { "topic": "..." }
 ```
 
 ## Example: Multi-step with approval
@@ -159,45 +229,60 @@ flow_run with file: "flows/linkedin-post.json", input: { "topic": "..." }
 }
 ```
 
-## Example: Conditional routing
+## Example: Loop + exec + wildcard
 
 ```json
 {
-  "flow": "triage",
+  "flow": "process-and-email",
   "nodes": [
     {
-      "name": "classify",
+      "name": "parse",
       "do": "ai",
-      "prompt": "Classify this as urgent or normal: {{ trigger.message }}",
-      "schema": { "priority": "urgent | normal", "reason": "string" },
-      "model": "fast",
-      "output": "classification"
+      "prompt": "Extract items from: {{ trigger.text }}",
+      "schema": { "items": [{ "type": "string", "name": "string" }] },
+      "model": "smart",
+      "output": "parsed"
     },
     {
-      "name": "route",
-      "do": "condition",
-      "if": "classification.priority == 'urgent'",
-      "then": [
+      "name": "process_items",
+      "do": "loop",
+      "over": "parsed.items",
+      "as": "item",
+      "output": "process_items",
+      "nodes": [
         {
-          "name": "alert",
-          "do": "http",
-          "url": "https://hooks.slack.com/services/xxx",
-          "method": "POST",
-          "body": { "text": "URGENT: {{ classification.reason }}" }
-        }
-      ],
-      "else": [
+          "name": "build_path",
+          "do": "code",
+          "run": "`/output/${state.item.type}_${state.item.name}.pdf`",
+          "output": "outPath"
+        },
         {
-          "name": "queue",
-          "do": "memory",
-          "action": "write",
-          "key": "queue-{{ trigger.id }}",
-          "value": "{{ classification.reason }}"
+          "name": "generate",
+          "do": "exec",
+          "command": "python3 /scripts/generate{{ item.type == 'special' ? '_special' : '' }}.py '{{ outPath }}' '{{ item | json }}'",
+          "output": "genResult"
         }
       ]
+    },
+    {
+      "name": "notify",
+      "do": "agent",
+      "task": "Send email to {{ trigger.email }} with these attachments:\n{{ process_items[*].outPath }}"
     }
   ]
 }
+```
+
+## Saving flows for reuse
+
+When the user wants to save a flow for later use, write it to `flows/<flow-name>.json` in the workspace. File paths in `flow_run` resolve relative to `OPENCLAW_WORKSPACE`.
+
+```
+# Save
+Write the flow JSON to flows/linkedin-post.json
+
+# Run later
+flow_run with file: "flows/linkedin-post.json", input: { "topic": "..." }
 ```
 
 ## Other tools
