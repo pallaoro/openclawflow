@@ -418,7 +418,7 @@ Duration syntax: `30s`, `5m`, `2h`, `1d`. Maps directly to Cloudflare's `step.sl
 
 ---
 
-### `do: code` — inline expression
+### `do: code` — inline JavaScript
 
 ```json
 {
@@ -430,7 +430,19 @@ Duration syntax: `30s`, `5m`, `2h`, `1d`. Maps directly to Cloudflare's `step.sl
 }
 ```
 
-Constrained: synchronous expressions only, no imports, no async. For anything more complex, use `do: http` to call a function or `do: agent` with a code-writing tool.
+Single expressions are returned automatically. Multi-statement bodies (containing `;` or newlines) require an explicit `return`:
+
+```json
+{
+  "name": "calc",
+  "do": "code",
+  "input": "trigger",
+  "run": "const total = input.price * input.qty;\nconst tax = total * 0.22;\nreturn { total, tax, grand: total + tax };",
+  "output": "invoice"
+}
+```
+
+No imports, no async, no filesystem access. `state` and `input` are frozen — return new values instead of mutating. For scripts or complex logic, use `do: exec` to run shell commands. For external APIs, use `do: http`.
 
 ---
 

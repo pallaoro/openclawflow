@@ -33,7 +33,7 @@ A flow is JSON with a `flow` name and a `nodes` array. Call `flow_run` with the 
 | `memory` | Persistent key/value store | `action: "read"\|"write"\|"delete"`, `key` |
 | `wait` | Human approval gate or external event wait | `for: "approval"\|"event"`, `prompt`, `preview`, `timeout` |
 | `sleep` | Pause for a duration | `duration: "5m"` |
-| `code` | Inline JS expression | `run`, `input` |
+| `code` | Inline JS expression (for scripts, use `exec`) | `run`, `input` |
 
 ### Rules
 
