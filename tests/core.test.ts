@@ -57,6 +57,87 @@ describe("FlowRunner — code node", () => {
     const result = await runner.run(flow, { name: "World" });
     assert.equal(result.state.greeting, "Hello World");
   });
+
+  it("supports multi-statement body with explicit return", async () => {
+    const flow: FlowDefinition = {
+      flow: "test-code-multi",
+      nodes: [
+        { name: "calc", do: "code" as const, run: "const x = input + 1;\nreturn x * 2;", input: "trigger.x", output: "result" },
+      ],
+    };
+    const runner = new FlowRunner(cfg);
+    const result = await runner.run(flow, { x: 5 });
+    assert.equal(result.ok, true);
+    assert.equal(result.state.result, 12);
+  });
+
+  it("supports semicolon-separated multi-statement body", async () => {
+    const flow: FlowDefinition = {
+      flow: "test-code-semi",
+      nodes: [
+        { name: "calc", do: "code" as const, run: "const a = input.x; const b = input.y; return a + b;", input: "trigger", output: "result" },
+      ],
+    };
+    const runner = new FlowRunner(cfg);
+    const result = await runner.run(flow, { x: 3, y: 7 });
+    assert.equal(result.ok, true);
+    assert.equal(result.state.result, 10);
+  });
+
+  it("prevents mutation of state", async () => {
+    const flow: FlowDefinition = {
+      flow: "test-code-frozen-state",
+      nodes: [
+        { name: "mutate", do: "code" as const, run: "state.trigger.x = 999; return 1;", input: "trigger", output: "result" },
+      ],
+    };
+    const runner = new FlowRunner(cfg);
+    const result = await runner.run(flow, { x: 1 });
+    assert.equal(result.ok, false);
+    assert.match(result.error!, /runtime error/);
+    assert.match(result.error!, /frozen/i);
+  });
+
+  it("prevents mutation of input", async () => {
+    const flow: FlowDefinition = {
+      flow: "test-code-frozen-input",
+      nodes: [
+        { name: "mutate", do: "code" as const, run: "input.x = 999; return 1;", input: "trigger", output: "result" },
+      ],
+    };
+    const runner = new FlowRunner(cfg);
+    const result = await runner.run(flow, { x: 1 });
+    assert.equal(result.ok, false);
+    assert.match(result.error!, /runtime error/);
+    assert.match(result.error!, /frozen/i);
+  });
+
+  it("provides helpful error for const in expression mode", async () => {
+    const flow: FlowDefinition = {
+      flow: "test-code-const-hint",
+      nodes: [
+        { name: "bad", do: "code" as const, run: "const x = 1", output: "result" },
+      ],
+    };
+    const runner = new FlowRunner(cfg);
+    const result = await runner.run(flow, {});
+    assert.equal(result.ok, false);
+    assert.match(result.error!, /syntax error/);
+    assert.match(result.error!, /const/);
+  });
+
+  it("provides helpful error for require() usage", async () => {
+    const flow: FlowDefinition = {
+      flow: "test-code-require-hint",
+      nodes: [
+        { name: "bad", do: "code" as const, run: "require('fs')", output: "result" },
+      ],
+    };
+    const runner = new FlowRunner(cfg);
+    const result = await runner.run(flow, {});
+    assert.equal(result.ok, false);
+    assert.match(result.error!, /require/);
+  });
 });
 
 // ---- FlowRunner: exec node ------------------------------------------------------

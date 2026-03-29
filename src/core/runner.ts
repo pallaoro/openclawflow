@@ -1195,17 +1195,75 @@ export class FlowRunner {
 
   // ---- do: code -----------------------------------------------------------------
 
+  /** Detect multi-statement code (contains ; or newline outside of string literals). */
+  private isMultiStatement(code: string): boolean {
+    const stripped = code.replace(/(["'`])(?:\\.|(?!\1)[^\\])*\1/g, '""');
+    return stripped.includes(";") || stripped.includes("\n");
+  }
+
+  /** Recursively freeze an object tree so code nodes cannot mutate state. */
+  private deepFreeze<T>(obj: T): T {
+    if (obj !== null && typeof obj === "object" && !Object.isFrozen(obj)) {
+      Object.freeze(obj);
+      for (const v of Object.values(obj as Record<string, unknown>)) {
+        this.deepFreeze(v);
+      }
+    }
+    return obj;
+  }
+
   private execCode(node: CodeNode, state: FlowState): { output: unknown } {
     // Support both plain dotted paths ("plan.field") and template syntax ("{{ plan.field }}")
     const rawInput = node.input ? this.resolveBodyObject(node.input, state) : undefined;
     const input = typeof rawInput === "string" ? this.getPath(state, rawInput) : rawInput;
+
+    const multiStatement = this.isMultiStatement(node.run);
+    const body = multiStatement
+      ? `"use strict"; ${node.run}`
+      : `"use strict"; return (${node.run});`;
+
     // eslint-disable-next-line no-new-func
-    const fn = new Function(
-      "input",
-      "state",
-      `"use strict"; return (${node.run});`,
-    );
-    return { output: fn(input, state) };
+    let fn: Function;
+    try {
+      fn = new Function("input", "state", body);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      let hint = "";
+      if (!multiStatement && /require\s*\(/.test(node.run)) {
+        hint = " Hint: require() is not available in code nodes.";
+      } else if (!multiStatement && /(const|let|var)\s+\w+/.test(node.run)) {
+        hint =
+          " Hint: declarations like const/let/var need multi-statement mode — add a semicolon or newline and use an explicit return.";
+      } else if (!multiStatement) {
+        hint =
+          ' Hint: if your code has multiple statements, separate them with semicolons and use an explicit "return".';
+      }
+      throw new Error(
+        `code "${node.name}": syntax error — ${msg}.${hint}`,
+      );
+    }
+
+    const frozenState = this.deepFreeze(JSON.parse(JSON.stringify(state)));
+    const frozenInput =
+      input !== undefined
+        ? this.deepFreeze(JSON.parse(JSON.stringify(input)))
+        : undefined;
+
+    try {
+      return { output: fn(frozenInput, frozenState) };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      let hint = "";
+      if (/is not a function/.test(msg) && /require/.test(node.run)) {
+        hint = " Hint: require() is not available in code nodes.";
+      } else if (/read only|Cannot assign|Cannot add/i.test(msg)) {
+        hint =
+          " Hint: state and input are frozen — return new values instead of mutating.";
+      }
+      throw new Error(
+        `code "${node.name}": runtime error — ${msg}.${hint}`,
+      );
+    }
   }
 
   // ---- do: exec ----------------------------------------------------------------
