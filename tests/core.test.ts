@@ -1090,4 +1090,127 @@ describe("validateFlow", () => {
     assert.equal(result.ok, false);
     assert.ok(result.errors.some((e) => e.message.includes("Unknown node type")));
   });
+
+  it("validates env field structure", () => {
+    const flow: FlowDefinition = {
+      flow: "env-valid",
+      env: { API_KEY: null, MODE: "prod" },
+      nodes: [{ name: "a", do: "code" as const, run: "'ok'", output: "x" }],
+    };
+    assert.equal(validateFlow(flow).ok, true);
+  });
+
+  it("rejects non-string env values", () => {
+    const flow: FlowDefinition = {
+      flow: "env-bad",
+      env: { BAD: 123 as any },
+      nodes: [{ name: "a", do: "code" as const, run: "'ok'", output: "x" }],
+    };
+    const result = validateFlow(flow);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.message.includes("must be a string or null")));
+  });
+
+  it("allows {{ env.X }} template references without errors", () => {
+    const flow: FlowDefinition = {
+      flow: "env-ref",
+      nodes: [{
+        name: "call",
+        do: "http" as const,
+        url: "https://api.example.com",
+        headers: { Authorization: "Bearer {{ env.TOKEN }}" },
+        output: "resp",
+      }],
+    };
+    const result = validateFlow(flow);
+    assert.equal(result.ok, true);
+  });
+});
+
+// ---- FlowRunner — env support -----------------------------------------------------
+
+describe("FlowRunner — env", () => {
+  after(cleanup);
+
+  it("resolves {{ env.X }} from flow env defaults", async () => {
+    const flow: FlowDefinition = {
+      flow: "env-default",
+      env: { GREETING: "hello" },
+      nodes: [
+        { name: "echo", do: "code" as const, run: "input", input: "env.GREETING", output: "result" },
+      ],
+    };
+    const runner = new FlowRunner(cfg);
+    const result = await runner.run(flow, {});
+    assert.equal(result.ok, true);
+    assert.equal(result.state.result, "hello");
+  });
+
+  it("process.env overrides flow env defaults", async () => {
+    process.env.TEST_CF_OVERRIDE = "from-process";
+    try {
+      const flow: FlowDefinition = {
+        flow: "env-override",
+        env: { TEST_CF_OVERRIDE: "default-val" },
+        nodes: [
+          { name: "echo", do: "code" as const, run: "input", input: "env.TEST_CF_OVERRIDE", output: "result" },
+        ],
+      };
+      const runner = new FlowRunner(cfg);
+      const result = await runner.run(flow, {});
+      assert.equal(result.ok, true);
+      assert.equal(result.state.result, "from-process");
+    } finally {
+      delete process.env.TEST_CF_OVERRIDE;
+    }
+  });
+
+  it("fails when required env var (null) is missing", async () => {
+    delete process.env.MISSING_VAR;
+    const flow: FlowDefinition = {
+      flow: "env-required",
+      env: { MISSING_VAR: null },
+      nodes: [
+        { name: "a", do: "code" as const, run: "'ok'", output: "x" },
+      ],
+    };
+    const runner = new FlowRunner(cfg);
+    const result = await runner.run(flow, {});
+    assert.equal(result.ok, false);
+    assert.ok(result.error?.includes("Missing required env vars"));
+    assert.ok(result.error?.includes("MISSING_VAR"));
+  });
+
+  it("resolves {{ env.TOKEN }} in http headers via templates", async () => {
+    const flow: FlowDefinition = {
+      flow: "env-template",
+      env: { TOKEN: "my-secret-token" },
+      nodes: [
+        { name: "show", do: "code" as const, run: "input", input: "env.TOKEN", output: "tok" },
+      ],
+    };
+    const runner = new FlowRunner(cfg);
+    const result = await runner.run(flow, {});
+    assert.equal(result.ok, true);
+    assert.equal(result.state.tok, "my-secret-token");
+  });
+
+  it("required env var satisfied by process.env succeeds", async () => {
+    process.env.TEST_CF_REQUIRED = "provided";
+    try {
+      const flow: FlowDefinition = {
+        flow: "env-required-ok",
+        env: { TEST_CF_REQUIRED: null },
+        nodes: [
+          { name: "echo", do: "code" as const, run: "input", input: "env.TEST_CF_REQUIRED", output: "result" },
+        ],
+      };
+      const runner = new FlowRunner(cfg);
+      const result = await runner.run(flow, {});
+      assert.equal(result.ok, true);
+      assert.equal(result.state.result, "provided");
+    } finally {
+      delete process.env.TEST_CF_REQUIRED;
+    }
+  });
 });

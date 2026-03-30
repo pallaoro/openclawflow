@@ -16,7 +16,7 @@ You have access to the `flow_run` tool. Use it to design and execute declarative
 
 ## How to write a flow
 
-A flow is JSON with a `flow` name and a `nodes` array. Call `flow_run` with the flow inline or from a file.
+A flow is JSON with a `flow` name, an optional `env` block, and a `nodes` array. Call `flow_run` with the flow inline or from a file.
 
 ### Node types (11 total)
 
@@ -51,12 +51,42 @@ A flow is JSON with a `flow` name and a `nodes` array. Call `flow_run` with the 
 - `do: condition` for boolean if/else, `do: branch` for multi-way value matching — both run inline sub-flows and reconverge
 - Model shorthands: `fast` (Gemini 3 Flash), `smart` (Claude Sonnet 4.6), `best` (Minimax M2.5)
 
+### Environment variables
+
+Flows can declare required and optional env vars via the `env` field. Values are defaults; `null` means the runtime must provide it (via `process.env` or a runtime-specific resolver like `cred`).
+
+```json
+{
+  "flow": "notion-sync",
+  "env": {
+    "NOTION_TOKEN": null,
+    "PAGE_SIZE": "10"
+  },
+  "nodes": [
+    {
+      "name": "search",
+      "do": "http",
+      "url": "https://api.notion.com/v1/search",
+      "headers": { "Authorization": "Bearer {{ env.NOTION_TOKEN }}" },
+      "body": { "page_size": "{{ env.PAGE_SIZE }}" },
+      "output": "results"
+    }
+  ]
+}
+```
+
+- `null` values are **required** — the flow fails at start if missing from `process.env`
+- String values are **defaults** — `process.env` overrides them if set
+- Access via `{{ env.VAR_NAME }}` in any template field
+- The flow declares *what* it needs; the runtime decides *how* to provide it (env vars, secrets manager, credential broker, etc.)
+
 ### Templates
 
 Any string field supports `{{ path.to.value }}` interpolation. The top-level key is always the **`output` field value**, not the node name:
 
 ```
 {{ trigger.body }}              — initial input (trigger is always available)
+{{ env.API_KEY }}               — environment variable (env is always available)
 {{ classification.category }}   — node with output: "classification" → access .category
 {{ trigger.user.email }}        — nested dotted path from trigger
 ```

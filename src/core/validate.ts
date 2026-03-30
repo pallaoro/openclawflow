@@ -41,6 +41,19 @@ export function validateFlow(flow: FlowDefinition): ValidationResult {
     return { ok: false, errors };
   }
 
+  // Validate env field if present
+  if (flow.env !== undefined) {
+    if (typeof flow.env !== "object" || flow.env === null || Array.isArray(flow.env)) {
+      errors.push({ message: '"env" must be an object mapping variable names to string defaults or null' });
+    } else {
+      for (const [k, v] of Object.entries(flow.env)) {
+        if (v !== null && typeof v !== "string") {
+          errors.push({ field: `env.${k}`, message: `env var "${k}" must be a string or null, got ${typeof v}` });
+        }
+      }
+    }
+  }
+
   // Collect all output keys and node names across the entire flow tree
   const allNames = new Set<string>();
   const nameErrors: ValidationError[] = [];
@@ -115,9 +128,10 @@ function validateNodes(
   parentAvailable: Set<string>,
   errors: ValidationError[],
 ): void {
-  // Available keys: trigger is always available + anything from parent scope
+  // Available keys: trigger and env are always available + anything from parent scope
   const available = new Set(parentAvailable);
   available.add("trigger");
+  available.add("env");
 
   for (const node of nodes) {
     // Validate required fields per node type
