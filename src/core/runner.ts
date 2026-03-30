@@ -713,25 +713,14 @@ export class FlowRunner {
         ? `${task}\n\nContext:\n${typeof input === "object" ? JSON.stringify(input, null, 2) : String(input)}`
         : task;
 
-    const resolvedModel = node.model
-      ? MODEL_MAP[node.model] ?? node.model
-      : undefined;
-
-    // Prefer gateway webhook API (supports model overrides, richer interface).
-    // Falls back to CLI, then to a plain AI call.
-    const webhookResult = await this.tryOpenClawWebhook(
-      fullPrompt,
-      node.agent,
-      resolvedModel,
-    );
-    if (webhookResult !== null) {
-      return { output: this.autoParseJson(webhookResult) };
-    }
-
-    // Fallback: OpenClaw CLI (no model override support)
-    const cliResult = await this.tryOpenClawAgent(fullPrompt, node.agent);
-    if (cliResult !== null) {
-      return { output: this.autoParseJson(cliResult) };
+    // The openclaw CLI doesn't support --model and the gateway webhook API
+    // is async-only. When a model override is specified, skip the CLI and
+    // go straight to the AI call which handles model selection synchronously.
+    if (!node.model) {
+      const cliResult = await this.tryOpenClawAgent(fullPrompt, node.agent);
+      if (cliResult !== null) {
+        return { output: this.autoParseJson(cliResult) };
+      }
     }
 
     // Fallback: single AI call (no tools, no browser)
@@ -748,64 +737,6 @@ export class FlowRunner {
     );
     result.output = this.autoParseJson(result.output);
     return result;
-  }
-
-  /** Use the gateway webhook API (POST /hooks/agent) which supports model overrides. */
-  private async tryOpenClawWebhook(
-    message: string,
-    agentId?: string,
-    model?: string,
-  ): Promise<string | null> {
-    const gatewayUrl =
-      this.cfg.gatewayUrl ??
-      process.env.OPENCLAW_GATEWAY_URL ??
-      this.detectGatewayUrl();
-
-    if (!gatewayUrl) return null;
-
-    const token =
-      this.cfg.gatewayToken ??
-      process.env.OPENCLAW_GATEWAY_TOKEN ??
-      process.env.OPENCLAW_GATEWAY_PASSWORD;
-
-    const effectiveAgent = agentId ?? this.cfg.defaultAgent ?? "main";
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (token) {
-      headers["x-openclaw-token"] = token;
-    }
-
-    const body: Record<string, unknown> = {
-      message,
-      agentId: effectiveAgent,
-    };
-    if (model) body.model = model;
-
-    const timeoutMs = this.cfg.maxNodeDurationMs ?? 120_000;
-    try {
-      const resp = await fetch(`${gatewayUrl}/hooks/agent`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-      if (!resp.ok) {
-        // 404 means hooks endpoint not enabled — fall through
-        if (resp.status === 404) return null;
-        throw new Error(`Gateway webhook returned ${resp.status}: ${await resp.text()}`);
-      }
-      const data = await resp.json() as Record<string, unknown>;
-      const reply = data.reply ?? data.message ?? data.text ?? JSON.stringify(data);
-      return String(reply).trim();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      // Network errors (gateway not running) — fall through to CLI
-      if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed") || msg.includes("404")) {
-        return null;
-      }
-      throw new Error(`openclaw webhook failed: ${msg}`);
-    }
   }
 
   private async tryOpenClawAgent(
