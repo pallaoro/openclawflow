@@ -24,6 +24,10 @@ export interface WebhookServerOpts {
 
 const MAX_BODY_BYTES = 1_048_576; // 1 MB
 
+// Guard against double-init when register() is called more than once
+// (OpenClaw calls it during discovery and again at gateway startup).
+let activeServer: http.Server | null = null;
+
 function resolveFlowsDir(serve: ServeConfig): string {
   return (
     serve.flowsDir ??
@@ -78,6 +82,8 @@ function readBody(req: http.IncomingMessage): Promise<string> {
 }
 
 export function startWebhookServer(opts: WebhookServerOpts): http.Server {
+  if (activeServer) return activeServer;
+
   const { runner, serve, logger } = opts;
   const basePath = (serve.path ?? "/flows").replace(/\/+$/, "");
   const flowsDir = resolveFlowsDir(serve);
@@ -159,6 +165,8 @@ export function startWebhookServer(opts: WebhookServerOpts): http.Server {
       json(res, 500, { error: "Internal server error" });
     }
   });
+
+  activeServer = server;
 
   server.listen(serve.port, () => {
     log.info(
