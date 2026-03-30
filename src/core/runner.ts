@@ -1205,6 +1205,12 @@ export class FlowRunner {
 
   /** Detect multi-statement code (contains ; or newline outside of string literals). */
   private isMultiStatement(code: string): boolean {
+    // An IIFE like (function(){ ...; return x; })() is a single expression
+    // even though it contains semicolons internally — don't flag it.
+    const trimmed = code.trim();
+    if (/^\(function\s*\(/.test(trimmed) && /\}\s*\)\s*\(\s*\)$/.test(trimmed)) {
+      return false;
+    }
     const stripped = code.replace(/(["'`])(?:\\.|(?!\1)[^\\])*\1/g, '""');
     return stripped.includes(";") || stripped.includes("\n");
   }
