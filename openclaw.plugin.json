@@ -16,7 +16,16 @@
       "gatewayToken": { "type": "string" },
       "memoryDir": { "type": "string" },
       "stateDir": { "type": "string" },
-      "maxNodeDurationMs": { "type": "number" }
+      "maxNodeDurationMs": { "type": "number" },
+      "serve": {
+        "type": "object",
+        "properties": {
+          "port": { "type": "number" },
+          "path": { "type": "string" },
+          "flowsDir": { "type": "string" }
+        },
+        "required": ["port"]
+      }
     }
   },
   "uiHints": {
@@ -28,6 +37,7 @@
     "gatewayToken": { "label": "Gateway Token", "sensitive": true, "help": "Auto-detected from OPENCLAW_GATEWAY_TOKEN" },
     "memoryDir": { "label": "Memory Directory" },
     "stateDir": { "label": "Flow State Directory" },
-    "maxNodeDurationMs": { "label": "Node Timeout (ms)", "placeholder": "30000" }
+    "maxNodeDurationMs": { "label": "Node Timeout (ms)", "placeholder": "30000" },
+    "serve": { "label": "Webhook Server", "help": "Start an HTTP server for triggering flows via webhook. Requires at least port." }
   }
 }

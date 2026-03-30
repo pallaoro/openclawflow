@@ -292,6 +292,12 @@ export type InferenceFn = (req: InferenceRequest) => Promise<InferenceResult>;
 
 // ---- Plugin Config --------------------------------------------------------------
 
+export interface ServeConfig {
+  port: number;
+  path?: string; // base path prefix, default "/flows"
+  flowsDir?: string; // directory containing .json flow files, default workspace/flows
+}
+
 export interface PluginConfig {
   apiKey?: string;
   defaultModel?: string;
@@ -307,6 +313,8 @@ export interface PluginConfig {
   gatewayUrl?: string;
   /** Gateway auth token */
   gatewayToken?: string;
+  /** Webhook server config — starts an HTTP server for triggering flows externally */
+  serve?: ServeConfig;
 }
 
 // ---- Model Shorthands -----------------------------------------------------------
