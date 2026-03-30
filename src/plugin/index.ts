@@ -1,5 +1,6 @@
 import { FlowRunner, sendEvent } from "../core/runner.js";
 import { transpileToCloudflare } from "../core/transpile.js";
+import { startWebhookServer } from "../core/serve.js";
 import type { FlowDefinition, PluginConfig } from "../core/types.js";
 
 // ---- OpenClaw Plugin: clawflow ---------------------------------------------------
@@ -61,6 +62,15 @@ function register(api: PluginApi) {
 
   const runner = new FlowRunner(pluginCfg);
   const store = runner.getStore();
+
+  // ---- Webhook server (optional) ------------------------------------------------
+  if (pluginCfg.serve) {
+    startWebhookServer({
+      runner,
+      serve: pluginCfg.serve,
+      logger: api.logger,
+    });
+  }
 
   // ---- flow_run -----------------------------------------------------------------
 
