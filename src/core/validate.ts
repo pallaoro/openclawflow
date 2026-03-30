@@ -159,6 +159,7 @@ function validateNodeFields(node: FlowNode, errors: ValidationError[]): void {
     case "agent": {
       const n = node as AgentNode;
       if (!n.task) e("task", `agent node "${node.name}" requires "task"`);
+      if ("model" in node) e("model", `agent node "${node.name}" does not support "model" — configure the model on the openclaw agent instead`);
       break;
     }
     case "branch": {
