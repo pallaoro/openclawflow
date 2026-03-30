@@ -714,7 +714,7 @@ export class FlowRunner {
         : task;
 
     // Try OpenClaw agent CLI first (real agent with tools)
-    const cliResult = await this.tryOpenClawAgent(fullPrompt, node.agent);
+    const cliResult = await this.tryOpenClawAgent(fullPrompt, node.agent, node.model);
     if (cliResult !== null) {
       return { output: this.autoParseJson(cliResult) };
     }
@@ -738,6 +738,7 @@ export class FlowRunner {
   private async tryOpenClawAgent(
     message: string,
     agentId?: string,
+    model?: string,
   ): Promise<string | null> {
     const { execFile } = await import("child_process");
     const { promisify } = await import("util");
@@ -753,6 +754,7 @@ export class FlowRunner {
     // Resolution: node.agent > plugin config defaultAgent > "main"
     const effectiveAgent = agentId ?? this.cfg.defaultAgent ?? "main";
     const args = ["agent", "--agent", effectiveAgent, "--message", message];
+    if (model) args.push("--model", MODEL_MAP[model] ?? model);
 
     try {
       const { stdout } = await execFileAsync("openclaw", args, {
