@@ -138,6 +138,24 @@ describe("FlowRunner — code node", () => {
     assert.equal(result.ok, false);
     assert.match(result.error!, /require/);
   });
+
+  it("IIFE expressions return their value (not treated as multi-statement)", async () => {
+    const flow: FlowDefinition = {
+      flow: "test-code-iife",
+      nodes: [
+        {
+          name: "build",
+          do: "code" as const,
+          run: "(function() { var a = 'hello'; var b = 'world'; return a + ' ' + b; })()",
+          output: "result",
+        },
+      ],
+    };
+    const runner = new FlowRunner(cfg);
+    const result = await runner.run(flow, {});
+    assert.equal(result.ok, true);
+    assert.equal(result.state.result, "hello world");
+  });
 });
 
 // ---- FlowRunner: exec node ------------------------------------------------------
