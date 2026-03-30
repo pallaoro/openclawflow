@@ -23,7 +23,7 @@ A flow is JSON with a `flow` name and a `nodes` array. Call `flow_run` with the 
 | Node | Purpose | Key fields |
 |------|---------|------------|
 | `ai` | Single LLM call, structured or freeform | `prompt`, `schema`, `model`, `input` |
-| `agent` | Delegate to a real OpenClaw agent (with tools, browser, etc.) | `task`, `agent`, `tools`, `model` |
+| `agent` | Delegate to a real OpenClaw agent (with tools, browser, etc.) | `task`, `agent`, `tools` |
 | `exec` | Run a shell command deterministically (no AI) | `command`, `cwd` |
 | `branch` | Multi-way routing with inline sub-flows per path | `on`, `paths`, `default` |
 | `condition` | If/else with sub-node blocks that reconverge | `if`, `then`, `else` |
@@ -311,6 +311,88 @@ extract (agent) → parse (ai+schema) → loop:
     }
   ]
 }
+```
+
+## Triggers
+
+Flows can declare a `trigger` field to specify how they are started:
+
+```json
+{
+  "flow": "handle-ticket",
+  "trigger": { "on": "webhook", "from": "helpdesk" },
+  "nodes": [...]
+}
+```
+
+| Field | Purpose |
+|-------|---------|
+| `on` | Trigger type: `"webhook"`, `"cron"`, `"manual"`, `"event"` |
+| `from` | Optional source label (e.g. `"helpdesk"`, `"stripe"`) |
+| `schedule` | Cron expression when `on: "cron"` (e.g. `"0 9 * * 1"`) |
+
+### Webhook server
+
+When `serve` is configured in the plugin config, clawflow starts an HTTP server that accepts webhook triggers:
+
+```
+POST /:basePath/:flowName/webhook  — trigger a flow with JSON body as input
+GET  /:basePath/health              — health check
+```
+
+- The flow JSON body is passed as `trigger` input (accessible via `{{ trigger.field }}`)
+- The flow **must** declare `trigger.on: "webhook"` or the server returns 400
+- Response is `202 Accepted` with `{ ok, instanceId, flow }` — the flow runs asynchronously
+- Max request body: 1 MB
+- Flow files are loaded from `serve.flowsDir` (default: `$OPENCLAW_WORKSPACE/flows`)
+
+**ServeConfig:**
+
+| Field | Default | Purpose |
+|-------|---------|---------|
+| `port` | (required) | Port to listen on |
+| `path` | `"/flows"` | Base path prefix |
+| `flowsDir` | `$OPENCLAW_WORKSPACE/flows` | Directory containing `.json` flow files |
+
+### Example: webhook-triggered flow
+
+```json
+{
+  "flow": "triage-support-ticket",
+  "trigger": { "on": "webhook", "from": "helpdesk" },
+  "nodes": [
+    {
+      "name": "classify",
+      "do": "ai",
+      "prompt": "Classify this support ticket:\n\nSubject: {{ trigger.subject }}\nBody: {{ trigger.body }}",
+      "schema": { "category": "string", "priority": "string", "summary": "string" },
+      "model": "smart",
+      "output": "classification"
+    },
+    {
+      "name": "route",
+      "do": "branch",
+      "on": "classification.priority",
+      "paths": {
+        "urgent": [
+          { "name": "page", "do": "http", "url": "https://api.pagerduty.com/incidents", "method": "POST", "body": { "summary": "{{ classification.summary }}" } }
+        ],
+        "high": [
+          { "name": "slack", "do": "http", "url": "https://hooks.slack.com/...", "method": "POST", "body": { "text": "[{{ classification.category }}] {{ classification.summary }}" } }
+        ]
+      },
+      "default": []
+    }
+  ]
+}
+```
+
+Trigger this flow with:
+```
+POST http://localhost:3000/flows/triage-support-ticket/webhook
+Content-Type: application/json
+
+{ "subject": "Can't log in", "body": "Getting 403 error since this morning..." }
 ```
 
 ## Saving flows for reuse
