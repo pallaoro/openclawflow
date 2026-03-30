@@ -25,6 +25,7 @@ export interface InstanceRecord {
   pausedAtIndex?: number; // node index where flow paused (for resume)
   resumeToken?: string;
   waitingFor?: FlowResult["waitingFor"];
+  error?: string; // persisted error message for failed flows
   createdAt: string;
   updatedAt: string;
 }

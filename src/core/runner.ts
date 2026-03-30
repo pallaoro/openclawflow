@@ -143,7 +143,7 @@ export class FlowRunner {
             const resolved = stdout.trim();
             if (!resolved) {
               const error = `env var "${k}": command "${v}" returned empty`;
-              this.store.update(id, { status: "failed" });
+              this.store.update(id, { status: "failed", error });
               return {
                 ok: false, status: "failed", flowName: flow.flow ?? "unknown",
                 instanceId: id, state, trace: [], error,
@@ -152,7 +152,7 @@ export class FlowRunner {
             env[k] = resolved;
           } catch (err) {
             const error = `env var "${k}": failed to resolve "${v}": ${err instanceof Error ? err.message : String(err)}`;
-            this.store.update(id, { status: "failed" });
+            this.store.update(id, { status: "failed", error });
             return {
               ok: false, status: "failed", flowName: flow.flow ?? "unknown",
               instanceId: id, state, trace: [], error,
@@ -169,7 +169,7 @@ export class FlowRunner {
         .map(([k]) => k);
       if (missing.length > 0) {
         const error = `Missing required env vars: ${missing.join(", ")}`;
-        this.store.update(id, { status: "failed" });
+        this.store.update(id, { status: "failed", error });
         return {
           ok: false, status: "failed", flowName: flow.flow ?? "unknown",
           instanceId: id, state, trace: [], error,
@@ -364,7 +364,8 @@ export class FlowRunner {
           durationMs: Date.now() - t0,
         };
         trace.push(entry);
-        this.store.update(instanceId, { status: "failed", state, trace });
+        const error = `Node "${node.name}": ${message}`;
+        this.store.update(instanceId, { status: "failed", state, trace, error });
         return {
           ok: false,
           status: "failed",
@@ -372,7 +373,7 @@ export class FlowRunner {
           instanceId,
           state,
           trace,
-          error: `Node "${node.name}": ${message}`,
+          error,
         };
       }
     }
