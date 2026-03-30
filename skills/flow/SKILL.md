@@ -53,13 +53,18 @@ A flow is JSON with a `flow` name, an optional `env` block, and a `nodes` array.
 
 ### Environment variables
 
-Flows can declare required and optional env vars via the `env` field. Values are defaults; `null` means the runtime must provide it (via `process.env` or a runtime-specific resolver like `cred`).
+Flows can declare required and optional env vars via the `env` field. Three value types:
+
+- `null` — **required**, flow fails at start if missing from `process.env`
+- `"string"` — **default**, `process.env` overrides if set
+- `"$(command)"` — **shell-expanded** at flow start, fails early if empty or errors
 
 ```json
 {
   "flow": "notion-sync",
   "env": {
     "NOTION_TOKEN": null,
+    "DB_URL": "$(cat /run/secrets/db_url)",
     "PAGE_SIZE": "10"
   },
   "nodes": [
@@ -75,10 +80,7 @@ Flows can declare required and optional env vars via the `env` field. Values are
 }
 ```
 
-- `null` values are **required** — the flow fails at start if missing from `process.env`
-- String values are **defaults** — `process.env` overrides them if set
-- Access via `{{ env.VAR_NAME }}` in any template field
-- The flow declares *what* it needs; the runtime decides *how* to provide it (env vars, secrets manager, credential broker, etc.)
+Access via `{{ env.VAR_NAME }}` in any template field. `process.env` always takes priority — if already set, the `$(...)` command is skipped.
 
 ### Templates
 

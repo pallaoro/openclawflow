@@ -118,35 +118,60 @@ export class FlowRunner {
     const id = instanceId ?? crypto.randomUUID();
     const state: FlowState = { trigger: input };
 
-    // Seed state.env: flow defaults ← process.env overrides ← runtime envOverride
-    const env: Record<string, string> = {};
+    // Seed state.env: flow defaults → shell-expand $(…) → process.env overrides
     if (flow.env) {
+      const env: Record<string, string> = {};
+      const shellPattern = /\$\((.+?)\)/;
+
       for (const [k, v] of Object.entries(flow.env)) {
-        if (v !== null) env[k] = v;
+        // process.env always wins
+        if (process.env[k] !== undefined) {
+          env[k] = process.env[k]!;
+          continue;
+        }
+        if (v === null) continue; // required, checked below
+        // Shell-expand $(…) in default values
+        if (shellPattern.test(v)) {
+          try {
+            const { exec } = await import("child_process");
+            const { promisify } = await import("util");
+            const execAsync = promisify(exec);
+            const { stdout } = await execAsync(v.replace(shellPattern, "$1"), { timeout: 10_000 });
+            const resolved = stdout.trim();
+            if (!resolved) {
+              return {
+                ok: false, status: "failed", flowName: flow.flow ?? "unknown",
+                instanceId: id, state, trace: [],
+                error: `env var "${k}": command "${v}" returned empty`,
+              };
+            }
+            env[k] = resolved;
+          } catch (err) {
+            return {
+              ok: false, status: "failed", flowName: flow.flow ?? "unknown",
+              instanceId: id, state, trace: [],
+              error: `env var "${k}": failed to resolve "${v}": ${err instanceof Error ? err.message : String(err)}`,
+            };
+          }
+        } else {
+          env[k] = v;
+        }
       }
-    }
-    // process.env overrides flow defaults (and supplies required vars)
-    for (const k of Object.keys(flow.env ?? {})) {
-      if (process.env[k] !== undefined) env[k] = process.env[k]!;
-    }
-    // Check required env vars (declared as null with no process.env override)
-    if (flow.env) {
+
+      // Check required env vars (null with no process.env override)
       const missing = Object.entries(flow.env)
         .filter(([k, v]) => v === null && !(k in env))
         .map(([k]) => k);
       if (missing.length > 0) {
         return {
-          ok: false,
-          status: "failed",
-          flowName: flow.flow ?? "unknown",
-          instanceId: id,
-          state,
-          trace: [],
+          ok: false, status: "failed", flowName: flow.flow ?? "unknown",
+          instanceId: id, state, trace: [],
           error: `Missing required env vars: ${missing.join(", ")}`,
         };
       }
+
+      if (Object.keys(env).length > 0) state.env = env;
     }
-    if (Object.keys(env).length > 0) state.env = env;
 
     this.store.create(id, flow.flow, state);
     return this.execute(flow, state, id, 0, []);

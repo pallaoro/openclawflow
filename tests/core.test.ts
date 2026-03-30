@@ -1213,4 +1213,65 @@ describe("FlowRunner — env", () => {
       delete process.env.TEST_CF_REQUIRED;
     }
   });
+
+  it("shell-expands $(command) in env values", async () => {
+    const flow: FlowDefinition = {
+      flow: "env-shell",
+      env: { GREETING: "$(echo hello-from-shell)" },
+      nodes: [
+        { name: "echo", do: "code" as const, run: "input", input: "env.GREETING", output: "result" },
+      ],
+    };
+    const runner = new FlowRunner(cfg);
+    const result = await runner.run(flow, {});
+    assert.equal(result.ok, true);
+    assert.equal(result.state.result, "hello-from-shell");
+  });
+
+  it("fails early when $(command) returns empty", async () => {
+    const flow: FlowDefinition = {
+      flow: "env-shell-empty",
+      env: { BAD: "$(printf '')" },
+      nodes: [
+        { name: "a", do: "code" as const, run: "'ok'", output: "x" },
+      ],
+    };
+    const runner = new FlowRunner(cfg);
+    const result = await runner.run(flow, {});
+    assert.equal(result.ok, false);
+    assert.ok(result.error?.includes("returned empty"));
+  });
+
+  it("fails early when $(command) errors", async () => {
+    const flow: FlowDefinition = {
+      flow: "env-shell-fail",
+      env: { BAD: "$(nonexistent_command_xyz_123)" },
+      nodes: [
+        { name: "a", do: "code" as const, run: "'ok'", output: "x" },
+      ],
+    };
+    const runner = new FlowRunner(cfg);
+    const result = await runner.run(flow, {});
+    assert.equal(result.ok, false);
+    assert.ok(result.error?.includes("failed to resolve"));
+  });
+
+  it("process.env overrides $(command) — no shell exec needed", async () => {
+    process.env.TEST_CF_SHELL_SKIP = "already-set";
+    try {
+      const flow: FlowDefinition = {
+        flow: "env-shell-skip",
+        env: { TEST_CF_SHELL_SKIP: "$(echo should-not-run)" },
+        nodes: [
+          { name: "echo", do: "code" as const, run: "input", input: "env.TEST_CF_SHELL_SKIP", output: "result" },
+        ],
+      };
+      const runner = new FlowRunner(cfg);
+      const result = await runner.run(flow, {});
+      assert.equal(result.ok, true);
+      assert.equal(result.state.result, "already-set");
+    } finally {
+      delete process.env.TEST_CF_SHELL_SKIP;
+    }
+  });
 });
