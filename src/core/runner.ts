@@ -713,14 +713,10 @@ export class FlowRunner {
         ? `${task}\n\nContext:\n${typeof input === "object" ? JSON.stringify(input, null, 2) : String(input)}`
         : task;
 
-    // The openclaw CLI doesn't support --model and the gateway webhook API
-    // is async-only. When a model override is specified, skip the CLI and
-    // go straight to the AI call which handles model selection synchronously.
-    if (!node.model) {
-      const cliResult = await this.tryOpenClawAgent(fullPrompt, node.agent);
-      if (cliResult !== null) {
-        return { output: this.autoParseJson(cliResult) };
-      }
+    // Try OpenClaw agent CLI first (real agent with tools)
+    const cliResult = await this.tryOpenClawAgent(fullPrompt, node.agent);
+    if (cliResult !== null) {
+      return { output: this.autoParseJson(cliResult) };
     }
 
     // Fallback: single AI call (no tools, no browser)
@@ -730,7 +726,7 @@ export class FlowRunner {
         do: "ai",
         prompt: fullPrompt,
         input: undefined,
-        model: node.model ?? "best",
+        model: "best",
         schema: undefined,
       },
       state,
