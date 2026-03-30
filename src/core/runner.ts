@@ -118,6 +118,9 @@ export class FlowRunner {
     const id = instanceId ?? crypto.randomUUID();
     const state: FlowState = { trigger: input };
 
+    // Create state record first — ensures a state file exists even if env resolution fails
+    this.store.create(id, flow.flow, state);
+
     // Seed state.env: flow defaults → shell-expand $(…) → process.env overrides
     if (flow.env) {
       const env: Record<string, string> = {};
@@ -139,18 +142,20 @@ export class FlowRunner {
             const { stdout } = await execAsync(v.replace(shellPattern, "$1"), { timeout: 10_000 });
             const resolved = stdout.trim();
             if (!resolved) {
+              const error = `env var "${k}": command "${v}" returned empty`;
+              this.store.update(id, { status: "failed" });
               return {
                 ok: false, status: "failed", flowName: flow.flow ?? "unknown",
-                instanceId: id, state, trace: [],
-                error: `env var "${k}": command "${v}" returned empty`,
+                instanceId: id, state, trace: [], error,
               };
             }
             env[k] = resolved;
           } catch (err) {
+            const error = `env var "${k}": failed to resolve "${v}": ${err instanceof Error ? err.message : String(err)}`;
+            this.store.update(id, { status: "failed" });
             return {
               ok: false, status: "failed", flowName: flow.flow ?? "unknown",
-              instanceId: id, state, trace: [],
-              error: `env var "${k}": failed to resolve "${v}": ${err instanceof Error ? err.message : String(err)}`,
+              instanceId: id, state, trace: [], error,
             };
           }
         } else {
@@ -163,17 +168,17 @@ export class FlowRunner {
         .filter(([k, v]) => v === null && !(k in env))
         .map(([k]) => k);
       if (missing.length > 0) {
+        const error = `Missing required env vars: ${missing.join(", ")}`;
+        this.store.update(id, { status: "failed" });
         return {
           ok: false, status: "failed", flowName: flow.flow ?? "unknown",
-          instanceId: id, state, trace: [],
-          error: `Missing required env vars: ${missing.join(", ")}`,
+          instanceId: id, state, trace: [], error,
         };
       }
 
       if (Object.keys(env).length > 0) state.env = env;
     }
 
-    this.store.create(id, flow.flow, state);
     return this.execute(flow, state, id, 0, []);
   }
 

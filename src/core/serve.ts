@@ -151,9 +151,15 @@ export function startWebhookServer(opts: WebhookServerOpts): http.Server {
       json(res, 202, { ok: true, instanceId, flow: flowName });
 
       // Run asynchronously — don't block the response
-      runner.run(flowDef, input, instanceId).catch((err) => {
+      runner.run(flowDef, input, instanceId).then((result) => {
+        if (!result.ok) {
+          log.error(
+            `[clawflow] flow "${flowName}" (${instanceId}) failed: ${result.error ?? "unknown error"}`,
+          );
+        }
+      }).catch((err) => {
         log.error(
-          `[clawflow] flow "${flowName}" (${instanceId}) failed: ${
+          `[clawflow] flow "${flowName}" (${instanceId}) crashed: ${
             err instanceof Error ? err.message : String(err)
           }`,
         );
