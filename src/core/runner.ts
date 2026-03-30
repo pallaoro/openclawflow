@@ -713,10 +713,14 @@ export class FlowRunner {
         ? `${task}\n\nContext:\n${typeof input === "object" ? JSON.stringify(input, null, 2) : String(input)}`
         : task;
 
-    // Try OpenClaw agent CLI first (real agent with tools)
-    const cliResult = await this.tryOpenClawAgent(fullPrompt, node.agent, node.model);
-    if (cliResult !== null) {
-      return { output: this.autoParseJson(cliResult) };
+    // The openclaw CLI doesn't support --model and the gateway webhook API
+    // is async-only. When a model override is specified, skip the CLI and
+    // go straight to the AI call which handles model selection synchronously.
+    if (!node.model) {
+      const cliResult = await this.tryOpenClawAgent(fullPrompt, node.agent);
+      if (cliResult !== null) {
+        return { output: this.autoParseJson(cliResult) };
+      }
     }
 
     // Fallback: single AI call (no tools, no browser)
@@ -738,7 +742,6 @@ export class FlowRunner {
   private async tryOpenClawAgent(
     message: string,
     agentId?: string,
-    model?: string,
   ): Promise<string | null> {
     const { execFile } = await import("child_process");
     const { promisify } = await import("util");
@@ -754,7 +757,6 @@ export class FlowRunner {
     // Resolution: node.agent > plugin config defaultAgent > "main"
     const effectiveAgent = agentId ?? this.cfg.defaultAgent ?? "main";
     const args = ["agent", "--agent", effectiveAgent, "--message", message];
-    if (model) args.push("--model", MODEL_MAP[model] ?? model);
 
     try {
       const { stdout } = await execFileAsync("openclaw", args, {
