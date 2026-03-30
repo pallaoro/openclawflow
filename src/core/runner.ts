@@ -464,7 +464,7 @@ export class FlowRunner {
     // 1. Injected inferenceFn (set by OpenClaw plugin — uses gateway providers)
     // 2. Gateway OpenAI-compatible endpoint (auto-detected or configured)
     // 3. Direct Anthropic API (requires ANTHROPIC_API_KEY)
-    const text = await this.callInference(model, system, userContent, node.temperature);
+    const text = await this.callInference(model, system, userContent, node.temperature, node.maxTokens);
 
     if (node.schema) {
       const clean = text
@@ -491,7 +491,10 @@ export class FlowRunner {
     system: string,
     prompt: string,
     temperature?: number,
+    maxTokens?: number,
   ): Promise<string> {
+    const tokens = maxTokens;
+
     // 1. Injected inference function (from OpenClaw plugin)
     if (this.cfg.inferenceFn) {
       const result = await this.cfg.inferenceFn({
@@ -499,7 +502,7 @@ export class FlowRunner {
         system,
         prompt,
         temperature: temperature ?? 0,
-        maxTokens: 1024,
+        maxTokens: tokens,
       });
       return result.text;
     }
@@ -512,7 +515,7 @@ export class FlowRunner {
 
     if (gatewayUrl) {
       try {
-        return await this.callGateway(gatewayUrl, model, system, prompt, temperature);
+        return await this.callGateway(gatewayUrl, model, system, prompt, temperature, tokens);
       } catch (err) {
         // If gateway returns 404 (endpoint not enabled), fall through to direct API
         const msg = err instanceof Error ? err.message : String(err);
@@ -525,7 +528,7 @@ export class FlowRunner {
     }
 
     // 3. Direct API (OpenRouter > Anthropic > OpenAI)
-    return this.callDirectApi(model, system, prompt, temperature);
+    return this.callDirectApi(model, system, prompt, temperature, tokens);
   }
 
   private detectGatewayUrl(): string | undefined {
@@ -545,6 +548,7 @@ export class FlowRunner {
     system: string,
     prompt: string,
     temperature?: number,
+    maxTokens?: number,
   ): Promise<string> {
     const token =
       this.cfg.gatewayToken ??
@@ -564,7 +568,7 @@ export class FlowRunner {
       body: JSON.stringify({
         model,
         temperature: temperature ?? 0,
-        max_tokens: 1024,
+        max_tokens: maxTokens,
         messages: [
           { role: "system", content: system },
           { role: "user", content: prompt },
@@ -588,6 +592,7 @@ export class FlowRunner {
     system: string,
     prompt: string,
     temperature?: number,
+    maxTokens?: number,
   ): Promise<string> {
     // Try OpenRouter first, then Anthropic, then OpenAI
     const openrouterKey = process.env.OPENROUTER_API_KEY;
@@ -606,6 +611,7 @@ export class FlowRunner {
         prompt,
         temperature,
         "OpenRouter",
+        maxTokens,
       );
     }
 
@@ -620,7 +626,7 @@ export class FlowRunner {
         },
         body: JSON.stringify({
           model,
-          max_tokens: 1024,
+          max_tokens: maxTokens,
           temperature: temperature ?? 0,
           system,
           messages: [{ role: "user", content: prompt }],
@@ -643,6 +649,7 @@ export class FlowRunner {
         prompt,
         temperature,
         "OpenAI",
+        maxTokens,
       );
     }
 
@@ -665,6 +672,7 @@ export class FlowRunner {
     prompt: string,
     temperature: number | undefined,
     provider: string,
+    maxTokens?: number,
   ): Promise<string> {
     const resp = await fetch(`${baseUrl}/v1/chat/completions`, {
       method: "POST",
@@ -674,7 +682,7 @@ export class FlowRunner {
       },
       body: JSON.stringify({
         model,
-        max_tokens: 1024,
+        max_tokens: maxTokens,
         temperature: temperature ?? 0,
         messages: [
           { role: "system", content: system },

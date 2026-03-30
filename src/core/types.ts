@@ -65,6 +65,7 @@ export interface AiNode extends BaseNode {
   schema?: Record<string, string>; // output shape; enables JSON mode
   model?: "fast" | "smart" | "best" | string;
   temperature?: number;
+  maxTokens?: number;
 }
 
 export interface AgentNode extends BaseNode {
