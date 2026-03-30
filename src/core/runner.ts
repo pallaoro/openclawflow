@@ -117,6 +117,37 @@ export class FlowRunner {
 
     const id = instanceId ?? crypto.randomUUID();
     const state: FlowState = { trigger: input };
+
+    // Seed state.env: flow defaults ← process.env overrides ← runtime envOverride
+    const env: Record<string, string> = {};
+    if (flow.env) {
+      for (const [k, v] of Object.entries(flow.env)) {
+        if (v !== null) env[k] = v;
+      }
+    }
+    // process.env overrides flow defaults (and supplies required vars)
+    for (const k of Object.keys(flow.env ?? {})) {
+      if (process.env[k] !== undefined) env[k] = process.env[k]!;
+    }
+    // Check required env vars (declared as null with no process.env override)
+    if (flow.env) {
+      const missing = Object.entries(flow.env)
+        .filter(([k, v]) => v === null && !(k in env))
+        .map(([k]) => k);
+      if (missing.length > 0) {
+        return {
+          ok: false,
+          status: "failed",
+          flowName: flow.flow ?? "unknown",
+          instanceId: id,
+          state,
+          trace: [],
+          error: `Missing required env vars: ${missing.join(", ")}`,
+        };
+      }
+    }
+    if (Object.keys(env).length > 0) state.env = env;
+
     this.store.create(id, flow.flow, state);
     return this.execute(flow, state, id, 0, []);
   }

@@ -14,6 +14,8 @@ export interface FlowDefinition {
   version?: string; // semver, e.g. "1.0.0"
   description?: string;
   trigger?: FlowTrigger;
+  /** Environment variables the flow expects. Values are defaults; null means required (runtime must provide). */
+  env?: Record<string, string | null>;
   nodes: FlowNode[];
 }
 
