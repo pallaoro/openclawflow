@@ -775,7 +775,11 @@ export class FlowRunner {
         ? `${task}\n\nContext:\n${typeof input === "object" ? JSON.stringify(input, null, 2) : String(input)}`
         : task;
 
-    const cliResult = await this.tryOpenClawAgent(fullPrompt, node.agent, state);
+    const timeoutMs = node.timeout
+      ? parseDuration(node.timeout)
+      : undefined;
+
+    const cliResult = await this.tryOpenClawAgent(fullPrompt, node.agent, state, timeoutMs);
     return { output: this.autoParseJson(cliResult) };
   }
 
@@ -783,6 +787,7 @@ export class FlowRunner {
     message: string,
     agentId: string | undefined,
     state: FlowState,
+    nodeTimeoutMs?: number,
   ): Promise<string> {
     const { execFile } = await import("child_process");
     const { promisify } = await import("util");
@@ -809,7 +814,7 @@ export class FlowRunner {
 
     try {
       const { stdout } = await execFileAsync("openclaw", args, {
-        timeout: this.cfg.maxNodeDurationMs ?? 120_000,
+        timeout: nodeTimeoutMs ?? this.cfg.maxNodeDurationMs ?? 120_000,
         maxBuffer: 10 * 1024 * 1024, // 10MB
         env,
       });
