@@ -762,7 +762,7 @@ export class FlowRunner {
 
   // ---- do: agent ----------------------------------------------------------------
   // Delegates to a real OpenClaw agent via CLI. The agent gets full tool access
-  // (browser, exec, memory, MCP, CLI). Falls back to AI call if CLI unavailable.
+  // (browser, exec, memory, MCP, CLI).
 
   private async execAgent(
     node: AgentNode,
@@ -775,32 +775,15 @@ export class FlowRunner {
         ? `${task}\n\nContext:\n${typeof input === "object" ? JSON.stringify(input, null, 2) : String(input)}`
         : task;
 
-    // Try OpenClaw agent CLI first (real agent with tools)
-    const cliResult = await this.tryOpenClawAgent(fullPrompt, node.agent);
-    if (cliResult !== null) {
-      return { output: this.autoParseJson(cliResult) };
-    }
-
-    // Fallback: single AI call (no tools, no browser)
-    const result = await this.execAi(
-      {
-        ...node,
-        do: "ai",
-        prompt: fullPrompt,
-        input: undefined,
-        model: "best",
-        schema: undefined,
-      },
-      state,
-    );
-    result.output = this.autoParseJson(result.output);
-    return result;
+    const cliResult = await this.tryOpenClawAgent(fullPrompt, node.agent, state);
+    return { output: this.autoParseJson(cliResult) };
   }
 
   private async tryOpenClawAgent(
     message: string,
-    agentId?: string,
-  ): Promise<string | null> {
+    agentId: string | undefined,
+    state: FlowState,
+  ): Promise<string> {
     const { execFile } = await import("child_process");
     const { promisify } = await import("util");
     const execFileAsync = promisify(execFile);
@@ -809,27 +792,25 @@ export class FlowRunner {
     try {
       await execFileAsync("which", ["openclaw"]);
     } catch {
-      return null;
+      throw new Error("openclaw CLI not found — agent nodes require the openclaw CLI to be installed");
     }
 
     // Resolution: node.agent > plugin config defaultAgent > "main"
     const effectiveAgent = agentId ?? this.cfg.defaultAgent ?? "main";
     const args = ["agent", "--agent", effectiveAgent, "--message", message];
 
+    // Merge flow-level env vars (state.env) into the child process environment
+    const env = { ...process.env, ...((state.env as Record<string, string>) ?? {}) };
+
     try {
       const { stdout } = await execFileAsync("openclaw", args, {
         timeout: this.cfg.maxNodeDurationMs ?? 120_000,
         maxBuffer: 10 * 1024 * 1024, // 10MB
-        env: { ...process.env },
+        env,
       });
       return stdout.trim();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      // If CLI fails (gateway down, etc.), return null to fall back to AI
-      if (msg.includes("ENOENT") || msg.includes("not found")) {
-        return null;
-      }
-      // Real execution errors should propagate
       throw new Error(`openclaw agent failed: ${msg}`);
     }
   }
