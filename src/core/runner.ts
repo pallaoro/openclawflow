@@ -799,8 +799,13 @@ export class FlowRunner {
     const effectiveAgent = agentId ?? this.cfg.defaultAgent ?? "main";
     const args = ["agent", "--agent", effectiveAgent, "--message", message];
 
-    // Merge flow-level env vars (state.env) into the child process environment
-    const env = { ...process.env, ...((state.env as Record<string, string>) ?? {}) };
+    // Merge flow-level env vars (state.env) into the child process environment.
+    // Set CLAWFLOW_NO_SERVE to prevent the child from binding the webhook port.
+    const env = {
+      ...process.env,
+      ...((state.env as Record<string, string>) ?? {}),
+      CLAWFLOW_NO_SERVE: "1",
+    };
 
     try {
       const { stdout } = await execFileAsync("openclaw", args, {

@@ -64,7 +64,8 @@ function register(api: PluginApi) {
   const store = runner.getStore();
 
   // ---- Webhook server (optional) ------------------------------------------------
-  if (pluginCfg.serve) {
+  // Skip when spawned as a child agent (CLAWFLOW_NO_SERVE) to avoid port conflicts.
+  if (pluginCfg.serve && !process.env.CLAWFLOW_NO_SERVE) {
     startWebhookServer({
       runner,
       serve: pluginCfg.serve,
