@@ -1391,7 +1391,7 @@ export class FlowRunner {
   private resolveBodyObject(obj: unknown, state: FlowState): unknown {
     if (typeof obj === "string") {
       // Check if the entire string is a single template expression
-      const singleMatch = obj.match(/^\{\{\s*([\w.]+)\s*(?:\|\s*(\w+))?\s*\}\}$/);
+      const singleMatch = obj.match(/^\{\{\s*([\w.\[\]0-9]+)\s*(?:\|\s*(\w+))?\s*\}\}$/);
       if (singleMatch) {
         const val = this.getPath(state, singleMatch[1]);
         if (val === undefined) return obj;
@@ -1452,7 +1452,7 @@ export class FlowRunner {
     );
 
     // Pass 3: simple path + optional filter  {{ path | filter }}
-    result = result.replace(/\{\{\s*([\w.]+)\s*(?:\|\s*(\w+))?\s*\}\}/g, (_m, p: string, filter?: string) => {
+    result = result.replace(/\{\{\s*([\w.\[\]0-9]+)\s*(?:\|\s*(\w+))?\s*\}\}/g, (_m, p: string, filter?: string) => {
       const val = this.getPath(state, p);
       if (val === undefined) return `{{${p}}}`;
       if (filter) return String(applyFilter(val, filter));
@@ -1465,7 +1465,7 @@ export class FlowRunner {
   /** Evaluate a simple condition expression for ternary templates */
   private evalTemplateCondition(expr: string, state: FlowState): boolean {
     // Match: path op value  (e.g. sheet.type == 'diametri')
-    const m = expr.match(/^([\w.]+)\s*(==|!=|>=?|<=?)\s*(.+)$/);
+    const m = expr.match(/^([\w.\[\]0-9]+)\s*(==|!=|>=?|<=?)\s*(.+)$/);
     if (!m) {
       // Bare truthy check: {{ flag ? 'yes' : 'no' }}
       const val = this.getPath(state, expr);
@@ -1495,8 +1495,31 @@ export class FlowRunner {
   }
 
   getPath(obj: unknown, dotPath: string): unknown {
-    return dotPath.split(".").reduce((cur, key) => {
+    // Split "business[0].name" into segments: ["business", "[0]", "name"]
+    const segments = dotPath.split(/\./).flatMap((key) => {
+      // Split "business[0]" into ["business", "0"]
+      const parts: string[] = [];
+      const m = key.match(/^([^\[]*)((?:\[\d+\])*)$/);
+      if (m) {
+        if (m[1]) parts.push(m[1]);
+        // Extract each [N] index
+        const indices = m[2].match(/\[(\d+)\]/g);
+        if (indices) {
+          for (const idx of indices) {
+            parts.push(idx.slice(1, -1)); // strip [ and ]
+          }
+        }
+      } else {
+        parts.push(key);
+      }
+      return parts;
+    });
+    return segments.reduce((cur, key) => {
       if (cur == null || typeof cur !== "object") return undefined;
+      if (Array.isArray(cur)) {
+        const idx = Number(key);
+        return Number.isInteger(idx) ? cur[idx] : undefined;
+      }
       return (cur as Record<string, unknown>)[key];
     }, obj);
   }
