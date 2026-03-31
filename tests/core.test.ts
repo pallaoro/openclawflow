@@ -905,6 +905,17 @@ describe("template filters", () => {
   it("wildcard preserves unresolved when not array", () => {
     assert.equal(runner.resolveTemplate("{{ plan.title[*].x }}", state), "{{plan.title[*].x}}");
   });
+
+  it("resolves array index {{ arr[0].field }}", () => {
+    const s = { ...state, business: [{ name: "Acme", id: 1 }, { name: "Beta", id: 2 }] };
+    assert.equal(runner.resolveTemplate("{{ business[0].name }}", s), "Acme");
+    assert.equal(runner.resolveTemplate("{{ business[1].id }}", s), "2");
+  });
+
+  it("resolves array index in mixed string", () => {
+    const s = { ...state, items: ["a", "b", "c"] };
+    assert.equal(runner.resolveTemplate("val={{ items[0] }}", s), "val=a");
+  });
 });
 
 // ---- validateFlow ---------------------------------------------------------------
