@@ -327,7 +327,9 @@ function checkStateRefs(
 ): void {
   if (node.do === "branch") {
     const n = node as BranchNode;
-    const rootKey = n.on?.split(".")[0];
+    // Strip {{ }} template wrapper if present
+    const onPath = n.on?.replace(/^\{\{\s*([\w.\[\]0-9]+)\s*\}\}$/, "$1");
+    const rootKey = onPath?.split(".")[0];
     if (rootKey && !available.has(rootKey)) {
       errors.push({
         node: node.name,
@@ -345,8 +347,10 @@ function checkStateRefs(
         "true", "false", "null", "undefined", "NaN", "Infinity",
         "typeof", "instanceof", "in", "new", "void", "delete",
       ]);
+      // Strip {{ }} template wrappers before extracting identifiers
+      const stripped = n.if.replace(/\{\{\s*(.*?)\s*\}\}/g, "$1");
       // Remove string literals first to avoid matching identifiers inside them
-      const cleaned = n.if.replace(/'[^']*'|"[^"]*"/g, "");
+      const cleaned = stripped.replace(/'[^']*'|"[^"]*"/g, "");
       const identPattern = /([a-zA-Z_][\w]*(?:\.[\w]+)*)/g;
       let match;
       while ((match = identPattern.exec(cleaned)) !== null) {

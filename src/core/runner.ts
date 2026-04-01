@@ -927,7 +927,9 @@ export class FlowRunner {
     flow: FlowDefinition,
     instanceId: string,
   ): Promise<{ output: unknown }> {
-    const value = String(this.getPath(state, node.on) ?? "");
+    // Strip {{ }} template wrapper if present so both "check.flag" and "{{ check.flag }}" work
+    const onPath = node.on.replace(/^\{\{\s*([\w.\[\]0-9]+)\s*\}\}$/, "$1");
+    const value = String(this.getPath(state, onPath) ?? "");
     const branch = node.paths[value] ?? node.default;
     if (!branch)
       throw new Error(
@@ -966,8 +968,9 @@ export class FlowRunner {
     flow: FlowDefinition,
     instanceId: string,
   ): Promise<{ output: unknown }> {
-    // Evaluate the condition expression against flow state
-    const conditionResult = this.evalCondition(node.if, state);
+    // Strip {{ }} template wrapper if present so both "check.skip" and "{{ check.skip }}" work
+    const condExpr = node.if.replace(/\{\{\s*(.*?)\s*\}\}/g, "$1");
+    const conditionResult = this.evalCondition(condExpr, state);
     const branch = conditionResult ? node.then : (node.else ?? []);
 
     if (branch.length === 0) {
