@@ -419,11 +419,18 @@ Returns instanceId for status tracking and resume.`,
 
         if (params.file) {
           const { readFileSync, existsSync } = await import("fs");
+          const pathMod = await import("path");
           const base =
             process.env.OPENCLAW_WORKSPACE ?? process.cwd();
-          const abs = params.file.startsWith("/")
-            ? params.file
-            : `${base}/${params.file}`;
+          let abs: string;
+          if (params.file.startsWith("/")) {
+            abs = params.file;
+          } else if (params.file.includes("/")) {
+            abs = pathMod.join(base, params.file);
+          } else {
+            const name = params.file.replace(/\.json$/, "");
+            abs = pathMod.join(base, "flows", `${name}.json`);
+          }
           if (!existsSync(abs))
             return {
               content: [{ type: "text", text: `File not found: ${abs}` }],
@@ -846,9 +853,15 @@ Examples:
           const fs = await import("fs");
           const pathMod = await import("path");
           const base = process.env.OPENCLAW_WORKSPACE ?? process.cwd();
-          const abs = params.file.startsWith("/")
-            ? params.file
-            : pathMod.join(base, params.file);
+          let abs: string;
+          if (params.file.startsWith("/")) {
+            abs = params.file;
+          } else if (params.file.includes("/")) {
+            abs = pathMod.join(base, params.file);
+          } else {
+            const name = params.file.replace(/\.json$/, "");
+            abs = pathMod.join(base, "flows", `${name}.json`);
+          }
           if (!fs.existsSync(abs))
             return {
               content: [{ type: "text", text: `File not found: ${abs}` }],

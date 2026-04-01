@@ -1740,3 +1740,300 @@ describe("FlowRunner — env", () => {
     }
   });
 });
+
+// ---- flow_edit deep node targeting --------------------------------------------------
+
+describe("flow_edit deep node targeting", () => {
+  // Capture the flow_edit execute function from the plugin
+  let flowEdit: (id: string, params: Record<string, unknown>) => Promise<{ content: { type: string; text: string }[]; details?: unknown }>;
+
+  before(async () => {
+    const plugin = (await import("../src/plugin/index.js")).default;
+    const tools: Record<string, (id: string, params: Record<string, unknown>) => Promise<unknown>> = {};
+    const mockApi = {
+      registerTool: (def: { name: string; execute: (...args: unknown[]) => Promise<unknown> }, _opts?: unknown) => {
+        tools[def.name] = def.execute as typeof tools[string];
+      },
+      config: {},
+    };
+    plugin.register(mockApi as any);
+    flowEdit = tools["flow_edit"] as typeof flowEdit;
+    assert.ok(flowEdit, "flow_edit tool should be registered");
+  });
+
+  /** Helper: build a flow with nested nodes for testing */
+  function makeNestedFlow(): FlowDefinition {
+    return {
+      flow: "test-deep-edit",
+      nodes: [
+        { name: "setup", do: "code" as const, run: "'init'", output: "init" },
+        {
+          name: "router", do: "branch" as const, on: "init",
+          paths: {
+            a: [
+              { name: "stepA1", do: "code" as const, run: "'a1'", output: "a1" },
+              { name: "stepA2", do: "code" as const, run: "'a2'", output: "a2" },
+            ],
+            b: [
+              { name: "stepB1", do: "code" as const, run: "'b1'", output: "b1" },
+            ],
+          },
+        },
+        { name: "final", do: "code" as const, run: "'done'", output: "done" },
+      ],
+    };
+  }
+
+  function makeConditionFlow(): FlowDefinition {
+    return {
+      flow: "test-deep-condition",
+      nodes: [
+        { name: "check", do: "code" as const, run: "true", output: "flag" },
+        {
+          name: "gate", do: "condition" as const, if: "flag == true",
+          then: [
+            { name: "thenStep", do: "code" as const, run: "'yes'", output: "thenOut" },
+          ],
+          else: [
+            { name: "elseStep", do: "code" as const, run: "'no'", output: "elseOut" },
+          ],
+        },
+      ],
+    };
+  }
+
+  function makeLoopFlow(): FlowDefinition {
+    return {
+      flow: "test-deep-loop",
+      nodes: [
+        { name: "data", do: "code" as const, run: "[1,2,3]", output: "items" },
+        {
+          name: "myLoop", do: "loop" as const, over: "items", as: "item",
+          nodes: [
+            { name: "process", do: "code" as const, run: "'processed'", output: "result" },
+          ],
+        },
+      ],
+    };
+  }
+
+  function makeParallelFlow(): FlowDefinition {
+    return {
+      flow: "test-deep-parallel",
+      nodes: [
+        {
+          name: "par", do: "parallel" as const,
+          nodes: [
+            { name: "branch1", do: "code" as const, run: "'b1'", output: "r1" },
+            { name: "branch2", do: "code" as const, run: "'b2'", output: "r2" },
+          ],
+        },
+      ],
+    };
+  }
+
+  // ---- Update nested nodes ----
+
+  it("updates a node nested inside a branch path", async () => {
+    const flow = makeNestedFlow();
+    const result = await flowEdit("test", {
+      flow, action: "update", node: "stepA1",
+      fields: { run: "'updated-a1'" },
+    });
+    assert.ok(result.content[0].text.includes("updated"));
+    const updated = result.details as FlowDefinition;
+    const router = updated.nodes[1] as any;
+    assert.equal(router.paths.a[0].run, "'updated-a1'");
+  });
+
+  it("updates a node nested inside a condition then block", async () => {
+    const flow = makeConditionFlow();
+    const result = await flowEdit("test", {
+      flow, action: "update", node: "thenStep",
+      fields: { run: "'updated-yes'" },
+    });
+    assert.ok(result.content[0].text.includes("updated"));
+    const updated = result.details as FlowDefinition;
+    const gate = updated.nodes[1] as any;
+    assert.equal(gate.then[0].run, "'updated-yes'");
+  });
+
+  it("updates a node nested inside a condition else block", async () => {
+    const flow = makeConditionFlow();
+    const result = await flowEdit("test", {
+      flow, action: "update", node: "elseStep",
+      fields: { run: "'updated-no'" },
+    });
+    assert.ok(result.content[0].text.includes("updated"));
+    const updated = result.details as FlowDefinition;
+    const gate = updated.nodes[1] as any;
+    assert.equal(gate.else[0].run, "'updated-no'");
+  });
+
+  it("updates a node nested inside a loop", async () => {
+    const flow = makeLoopFlow();
+    const result = await flowEdit("test", {
+      flow, action: "update", node: "process",
+      fields: { run: "'loop-updated'" },
+    });
+    assert.ok(result.content[0].text.includes("updated"));
+    const updated = result.details as FlowDefinition;
+    const loop = updated.nodes[1] as any;
+    assert.equal(loop.nodes[0].run, "'loop-updated'");
+  });
+
+  it("updates a node nested inside a parallel block", async () => {
+    const flow = makeParallelFlow();
+    const result = await flowEdit("test", {
+      flow, action: "update", node: "branch2",
+      fields: { run: "'par-updated'" },
+    });
+    assert.ok(result.content[0].text.includes("updated"));
+    const updated = result.details as FlowDefinition;
+    const par = updated.nodes[0] as any;
+    assert.equal(par.nodes[1].run, "'par-updated'");
+  });
+
+  it("replaces a nested node entirely", async () => {
+    const flow = makeNestedFlow();
+    const result = await flowEdit("test", {
+      flow, action: "update", node: "stepB1",
+      replace: { name: "stepB1", do: "code" as const, run: "'replaced'", output: "b1new" },
+    });
+    assert.ok(result.content[0].text.includes("updated"));
+    const updated = result.details as FlowDefinition;
+    const router = updated.nodes[1] as any;
+    assert.equal(router.paths.b[0].run, "'replaced'");
+    assert.equal(router.paths.b[0].output, "b1new");
+  });
+
+  // ---- Remove nested nodes ----
+
+  it("removes a node nested inside a branch path", async () => {
+    const flow = makeNestedFlow();
+    const result = await flowEdit("test", {
+      flow, action: "remove", node: "stepA2",
+    });
+    assert.ok(result.content[0].text.includes("removed"));
+    const updated = result.details as FlowDefinition;
+    const router = updated.nodes[1] as any;
+    assert.equal(router.paths.a.length, 1);
+    assert.equal(router.paths.a[0].name, "stepA1");
+  });
+
+  it("removes a node from a loop with multiple children", async () => {
+    const flow: FlowDefinition = {
+      flow: "test-loop-remove",
+      nodes: [
+        { name: "data", do: "code" as const, run: "[1,2]", output: "items" },
+        {
+          name: "myLoop", do: "loop" as const, over: "items", as: "item",
+          nodes: [
+            { name: "step1", do: "code" as const, run: "'a'", output: "r1" },
+            { name: "step2", do: "code" as const, run: "'b'", output: "r2" },
+          ],
+        },
+      ],
+    };
+    const result = await flowEdit("test", {
+      flow, action: "remove", node: "step1",
+    });
+    assert.ok(result.content[0].text.includes("removed"));
+    const updated = result.details as FlowDefinition;
+    const loop = updated.nodes[1] as any;
+    assert.equal(loop.nodes.length, 1);
+    assert.equal(loop.nodes[0].name, "step2");
+  });
+
+  // ---- Add into nested containers ----
+
+  it("adds a node inside a branch path via parent", async () => {
+    const flow = makeNestedFlow();
+    const result = await flowEdit("test", {
+      flow, action: "add", parent: "router/a",
+      nodeDefinition: { name: "stepA3", do: "code" as const, run: "'a3'", output: "a3" },
+    });
+    assert.ok(result.content[0].text.includes("added"));
+    const updated = result.details as FlowDefinition;
+    const router = updated.nodes[1] as any;
+    assert.equal(router.paths.a.length, 3);
+    assert.equal(router.paths.a[2].name, "stepA3");
+  });
+
+  it("adds a node inside a loop via parent", async () => {
+    const flow = makeLoopFlow();
+    const result = await flowEdit("test", {
+      flow, action: "add", parent: "myLoop",
+      nodeDefinition: { name: "extra", do: "code" as const, run: "'extra'", output: "extra" },
+    });
+    assert.ok(result.content[0].text.includes("added"));
+    const updated = result.details as FlowDefinition;
+    const loop = updated.nodes[1] as any;
+    assert.equal(loop.nodes.length, 2);
+    assert.equal(loop.nodes[1].name, "extra");
+  });
+
+  it("adds a node inside a condition then block via parent", async () => {
+    const flow = makeConditionFlow();
+    const result = await flowEdit("test", {
+      flow, action: "add", parent: "gate/then",
+      nodeDefinition: { name: "thenExtra", do: "code" as const, run: "'extra'", output: "thenExtra" },
+    });
+    assert.ok(result.content[0].text.includes("added"));
+    const updated = result.details as FlowDefinition;
+    const gate = updated.nodes[1] as any;
+    assert.equal(gate.then.length, 2);
+    assert.equal(gate.then[1].name, "thenExtra");
+  });
+
+  it("adds at a specific position inside a nested parent", async () => {
+    const flow = makeNestedFlow();
+    const result = await flowEdit("test", {
+      flow, action: "add", parent: "router/a", position: 0,
+      nodeDefinition: { name: "stepA0", do: "code" as const, run: "'a0'", output: "a0" },
+    });
+    assert.ok(result.content[0].text.includes("added"));
+    const updated = result.details as FlowDefinition;
+    const router = updated.nodes[1] as any;
+    assert.equal(router.paths.a[0].name, "stepA0");
+    assert.equal(router.paths.a.length, 3);
+  });
+
+  // ---- Move nested nodes ----
+
+  it("moves a nested node to a different position within same parent", async () => {
+    const flow = makeNestedFlow();
+    const result = await flowEdit("test", {
+      flow, action: "move", node: "stepA2", parent: "router/a", position: 0,
+    });
+    assert.ok(result.content[0].text.includes("moved"));
+    const updated = result.details as FlowDefinition;
+    const router = updated.nodes[1] as any;
+    assert.equal(router.paths.a[0].name, "stepA2");
+    assert.equal(router.paths.a[1].name, "stepA1");
+  });
+
+  // ---- Not-found still works ----
+
+  it("returns error for non-existent nested node", async () => {
+    const flow = makeNestedFlow();
+    const result = await flowEdit("test", {
+      flow, action: "update", node: "doesNotExist",
+      fields: { run: "'x'" },
+    });
+    assert.ok(result.content[0].text.includes("not found"));
+  });
+
+  // ---- Top-level still works alongside deep targeting ----
+
+  it("still updates top-level nodes", async () => {
+    const flow = makeNestedFlow();
+    const result = await flowEdit("test", {
+      flow, action: "update", node: "setup",
+      fields: { run: "'top-level-updated'" },
+    });
+    assert.ok(result.content[0].text.includes("updated"));
+    const updated = result.details as FlowDefinition;
+    assert.equal(updated.nodes[0].run, "'top-level-updated'");
+  });
+});
