@@ -437,6 +437,16 @@ function collectStringFields(node: FlowNode): { field: string; value: string }[]
     }
   }
 
+  // Check attachments (array of template strings)
+  const attachments = (node as unknown as Record<string, unknown>).attachments;
+  if (Array.isArray(attachments)) {
+    for (let i = 0; i < attachments.length; i++) {
+      if (typeof attachments[i] === "string") {
+        result.push({ field: `attachments[${i}]`, value: attachments[i] as string });
+      }
+    }
+  }
+
   // Check headers
   const headers = (node as unknown as Record<string, unknown>).headers;
   if (headers && typeof headers === "object") {

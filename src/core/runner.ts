@@ -25,6 +25,7 @@ import {
   SleepNode,
   CodeNode,
   ExecNode,
+  ContentPart,
   parseDuration,
 } from "./types.js";
 import { StateStore } from "./store.js";
@@ -515,18 +516,28 @@ export class FlowRunner {
       ? `\n\nReturn ONLY valid JSON matching exactly this schema (no markdown, no commentary):\n${JSON.stringify(node.schema, null, 2)}`
       : "";
 
-    const userContent =
+    const userText =
       input != null
         ? `${prompt}\n\nInput:\n${typeof input === "object" ? JSON.stringify(input, null, 2) : String(input)}`
         : prompt;
 
     const system = `You are a workflow step. Follow the prompt exactly.${jsonInstructions}`;
 
+    // Build multimodal content parts when attachments are present
+    let contentParts: ContentPart[] | undefined;
+    if (node.attachments?.length) {
+      contentParts = [{ type: "text", text: userText }];
+      for (const raw of node.attachments) {
+        const resolved = this.resolveTemplate(raw, state);
+        contentParts.push(this.attachmentToContentPart(resolved));
+      }
+    }
+
     // Resolution order:
     // 1. Injected inferenceFn (set by OpenClaw plugin — uses gateway providers)
     // 2. Gateway OpenAI-compatible endpoint (auto-detected or configured)
     // 3. Direct Anthropic API (requires ANTHROPIC_API_KEY)
-    const text = await this.callInference(model, system, userContent, node.temperature, node.maxTokens);
+    const text = await this.callInference(model, system, userText, node.temperature, node.maxTokens, contentParts);
 
     if (node.schema) {
       const clean = text
@@ -545,6 +556,97 @@ export class FlowRunner {
     return { output: text.trim() };
   }
 
+  // ---- File → content part -------------------------------------------------------
+
+  private static MIME_BY_EXT: Record<string, string> = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".pdf": "application/pdf",
+  };
+
+  private static isUrl(s: string): boolean {
+    return /^https?:\/\//i.test(s);
+  }
+
+  private attachmentToContentPart(value: string): ContentPart {
+    // URLs are passed through directly
+    if (FlowRunner.isUrl(value)) {
+      // Guess type from URL extension (default to image)
+      const urlPath = new URL(value).pathname.toLowerCase();
+      if (urlPath.endsWith(".pdf")) {
+        return {
+          type: "file",
+          file: {
+            filename: path.basename(urlPath),
+            file_data: value,
+          },
+        };
+      }
+      return { type: "image_url", image_url: { url: value } };
+    }
+
+    // Local file — read and base64-encode
+    const ext = path.extname(value).toLowerCase();
+    const mime = FlowRunner.MIME_BY_EXT[ext];
+    if (!mime) {
+      throw new Error(
+        `Unsupported attachment type "${ext}" for "${value}". Supported: ${Object.keys(FlowRunner.MIME_BY_EXT).join(", ")}`,
+      );
+    }
+    const data = fs.readFileSync(value);
+    const b64 = data.toString("base64");
+
+    if (mime === "application/pdf") {
+      return {
+        type: "file",
+        file: {
+          filename: path.basename(value),
+          file_data: `data:${mime};base64,${b64}`,
+        },
+      };
+    }
+    return {
+      type: "image_url",
+      image_url: { url: `data:${mime};base64,${b64}` },
+    };
+  }
+
+  /** Convert OpenAI/OpenRouter content parts to Anthropic message content format. */
+  private toAnthropicContent(parts: ContentPart[]): unknown[] {
+    return parts.map((p) => {
+      if (p.type === "text") return { type: "text", text: p.text };
+      if (p.type === "image_url") {
+        const url = p.image_url.url;
+        // data URL → extract media_type and base64 data
+        const match = url.match(/^data:(image\/[^;]+);base64,(.+)$/s);
+        if (match) {
+          return {
+            type: "image",
+            source: { type: "base64", media_type: match[1], data: match[2] },
+          };
+        }
+        // Remote URL
+        return { type: "image", source: { type: "url", url } };
+      }
+      if (p.type === "file") {
+        const fd = p.file.file_data;
+        const match = fd.match(/^data:(application\/pdf);base64,(.+)$/s);
+        if (match) {
+          return {
+            type: "document",
+            source: { type: "base64", media_type: match[1], data: match[2] },
+          };
+        }
+        // Remote URL
+        return { type: "document", source: { type: "url", url: fd } };
+      }
+      return p;
+    });
+  }
+
   // ---- Inference dispatch -------------------------------------------------------
   // Tries multiple backends in order: injected fn > gateway > direct Anthropic API
 
@@ -554,6 +656,7 @@ export class FlowRunner {
     prompt: string,
     temperature?: number,
     maxTokens?: number,
+    content?: ContentPart[],
   ): Promise<string> {
     const tokens = maxTokens;
 
@@ -563,6 +666,7 @@ export class FlowRunner {
         model,
         system,
         prompt,
+        content,
         temperature: temperature ?? 0,
         maxTokens: tokens,
       });
@@ -577,7 +681,7 @@ export class FlowRunner {
 
     if (gatewayUrl) {
       try {
-        return await this.callGateway(gatewayUrl, model, system, prompt, temperature, tokens);
+        return await this.callGateway(gatewayUrl, model, system, prompt, temperature, tokens, content);
       } catch (err) {
         // If gateway returns 404 (endpoint not enabled), fall through to direct API
         const msg = err instanceof Error ? err.message : String(err);
@@ -590,7 +694,7 @@ export class FlowRunner {
     }
 
     // 3. Direct API (OpenRouter > Anthropic > OpenAI)
-    return this.callDirectApi(model, system, prompt, temperature, tokens);
+    return this.callDirectApi(model, system, prompt, temperature, tokens, content);
   }
 
   private detectGatewayUrl(): string | undefined {
@@ -611,6 +715,7 @@ export class FlowRunner {
     prompt: string,
     temperature?: number,
     maxTokens?: number,
+    content?: ContentPart[],
   ): Promise<string> {
     const token =
       this.cfg.gatewayToken ??
@@ -633,7 +738,7 @@ export class FlowRunner {
         max_tokens: maxTokens,
         messages: [
           { role: "system", content: system },
-          { role: "user", content: prompt },
+          { role: "user", content: content ?? prompt },
         ],
       }),
     });
@@ -655,6 +760,7 @@ export class FlowRunner {
     prompt: string,
     temperature?: number,
     maxTokens?: number,
+    content?: ContentPart[],
   ): Promise<string> {
     // Try OpenRouter first, then Anthropic, then OpenAI
     const openrouterKey = process.env.OPENROUTER_API_KEY;
@@ -674,11 +780,18 @@ export class FlowRunner {
         temperature,
         "OpenRouter",
         maxTokens,
+        content,
       );
     }
 
     if (anthropicKey) {
       const baseUrl = this.cfg.baseUrl ?? "https://api.anthropic.com";
+
+      // Convert content parts to Anthropic format when multimodal
+      const userContent = content
+        ? this.toAnthropicContent(content)
+        : prompt;
+
       const resp = await fetch(`${baseUrl}/v1/messages`, {
         method: "POST",
         headers: {
@@ -691,7 +804,7 @@ export class FlowRunner {
           max_tokens: maxTokens,
           temperature: temperature ?? 0,
           system,
-          messages: [{ role: "user", content: prompt }],
+          messages: [{ role: "user", content: userContent }],
         }),
       });
       if (!resp.ok)
@@ -712,6 +825,7 @@ export class FlowRunner {
         temperature,
         "OpenAI",
         maxTokens,
+        content,
       );
     }
 
@@ -735,6 +849,7 @@ export class FlowRunner {
     temperature: number | undefined,
     provider: string,
     maxTokens?: number,
+    content?: ContentPart[],
   ): Promise<string> {
     const resp = await fetch(`${baseUrl}/v1/chat/completions`, {
       method: "POST",
@@ -748,7 +863,7 @@ export class FlowRunner {
         temperature: temperature ?? 0,
         messages: [
           { role: "system", content: system },
-          { role: "user", content: prompt },
+          { role: "user", content: content ?? prompt },
         ],
       }),
     });

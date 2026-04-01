@@ -1138,6 +1138,361 @@ describe("validateFlow", () => {
   });
 });
 
+// ---- Attachments (multimodal) -------------------------------------------------------
+
+describe("attachments — unit tests", () => {
+  after(cleanup);
+
+  it("passes content parts to inferenceFn", async () => {
+    // Create a tiny 1x1 PNG in the temp dir
+    const pngPath = path.join(tmpDir, "test.png");
+    fs.mkdirSync(path.dirname(pngPath), { recursive: true });
+    // Minimal valid 1x1 white PNG (67 bytes)
+    const pngBuf = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQAB" +
+      "Nl7BcQAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    fs.writeFileSync(pngPath, pngBuf);
+
+    let capturedContent: unknown = undefined;
+    const mockCfg: PluginConfig = {
+      ...cfg,
+      inferenceFn: async (req) => {
+        capturedContent = req.content;
+        return { text: "I see a white pixel" };
+      },
+    };
+
+    const flow: FlowDefinition = {
+      flow: "test-attachments",
+      nodes: [
+        {
+          name: "describe-img",
+          do: "ai" as const,
+          prompt: "What is in this image?",
+          attachments: [pngPath],
+          output: "desc",
+        },
+      ],
+    };
+
+    const runner = new FlowRunner(mockCfg);
+    const result = await runner.run(flow, {});
+    assert.equal(result.ok, true);
+    assert.equal(result.state.desc, "I see a white pixel");
+
+    // Verify content parts structure
+    assert.ok(Array.isArray(capturedContent));
+    const parts = capturedContent as any[];
+    assert.equal(parts.length, 2);
+    assert.equal(parts[0].type, "text");
+    assert.ok(parts[0].text.includes("What is in this image?"));
+    assert.equal(parts[1].type, "image_url");
+    assert.ok(parts[1].image_url.url.startsWith("data:image/png;base64,"));
+  });
+
+  it("passes URL attachments without reading files", async () => {
+    let capturedContent: unknown = undefined;
+    const mockCfg: PluginConfig = {
+      ...cfg,
+      inferenceFn: async (req) => {
+        capturedContent = req.content;
+        return { text: "nice image" };
+      },
+    };
+
+    const flow: FlowDefinition = {
+      flow: "test-url-attachment",
+      nodes: [
+        {
+          name: "describe-url",
+          do: "ai" as const,
+          prompt: "Describe",
+          attachments: ["https://example.com/photo.jpg"],
+          output: "desc",
+        },
+      ],
+    };
+
+    const runner = new FlowRunner(mockCfg);
+    const result = await runner.run(flow, {});
+    assert.equal(result.ok, true);
+
+    const parts = capturedContent as any[];
+    assert.equal(parts[1].type, "image_url");
+    assert.equal(parts[1].image_url.url, "https://example.com/photo.jpg");
+  });
+
+  it("handles PDF attachments with file type", async () => {
+    const pdfPath = path.join(tmpDir, "test.pdf");
+    fs.mkdirSync(path.dirname(pdfPath), { recursive: true });
+    // Minimal PDF header
+    fs.writeFileSync(pdfPath, "%PDF-1.4 minimal");
+
+    let capturedContent: unknown = undefined;
+    const mockCfg: PluginConfig = {
+      ...cfg,
+      inferenceFn: async (req) => {
+        capturedContent = req.content;
+        return { text: "document summary" };
+      },
+    };
+
+    const flow: FlowDefinition = {
+      flow: "test-pdf-attachment",
+      nodes: [
+        {
+          name: "read-pdf",
+          do: "ai" as const,
+          prompt: "Summarize this PDF",
+          attachments: [pdfPath],
+          output: "summary",
+        },
+      ],
+    };
+
+    const runner = new FlowRunner(mockCfg);
+    const result = await runner.run(flow, {});
+    assert.equal(result.ok, true);
+
+    const parts = capturedContent as any[];
+    assert.equal(parts[1].type, "file");
+    assert.equal(parts[1].file.filename, "test.pdf");
+    assert.ok(parts[1].file.file_data.startsWith("data:application/pdf;base64,"));
+  });
+
+  it("resolves templates in attachment paths", async () => {
+    const pngPath = path.join(tmpDir, "templated.png");
+    const pngBuf = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQAB" +
+      "Nl7BcQAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    fs.writeFileSync(pngPath, pngBuf);
+
+    let capturedContent: unknown = undefined;
+    const mockCfg: PluginConfig = {
+      ...cfg,
+      inferenceFn: async (req) => {
+        capturedContent = req.content;
+        return { text: "ok" };
+      },
+    };
+
+    const flow: FlowDefinition = {
+      flow: "test-template-attachment",
+      nodes: [
+        {
+          name: "analyze",
+          do: "ai" as const,
+          prompt: "Analyze",
+          attachments: ["{{ trigger.imgPath }}"],
+          output: "result",
+        },
+      ],
+    };
+
+    const runner = new FlowRunner(mockCfg);
+    const result = await runner.run(flow, { imgPath: pngPath });
+    assert.equal(result.ok, true);
+
+    const parts = capturedContent as any[];
+    assert.equal(parts.length, 2);
+    assert.equal(parts[1].type, "image_url");
+  });
+
+  it("rejects unsupported file extensions", async () => {
+    const txtPath = path.join(tmpDir, "bad.txt");
+    fs.writeFileSync(txtPath, "hello");
+
+    const mockCfg: PluginConfig = {
+      ...cfg,
+      inferenceFn: async () => ({ text: "nope" }),
+    };
+
+    const flow: FlowDefinition = {
+      flow: "test-bad-ext",
+      nodes: [
+        {
+          name: "bad",
+          do: "ai" as const,
+          prompt: "Read",
+          attachments: [txtPath],
+          output: "x",
+        },
+      ],
+    };
+
+    const runner = new FlowRunner(mockCfg);
+    const result = await runner.run(flow, {});
+    assert.equal(result.ok, false);
+    assert.ok(result.error?.includes("Unsupported attachment type"));
+  });
+
+  it("sends no content parts when attachments is empty", async () => {
+    let capturedContent: unknown = "NOT_SET";
+    const mockCfg: PluginConfig = {
+      ...cfg,
+      inferenceFn: async (req) => {
+        capturedContent = req.content;
+        return { text: "plain" };
+      },
+    };
+
+    const flow: FlowDefinition = {
+      flow: "test-no-attachments",
+      nodes: [
+        { name: "plain", do: "ai" as const, prompt: "Hi", output: "msg" },
+      ],
+    };
+
+    const runner = new FlowRunner(mockCfg);
+    const result = await runner.run(flow, {});
+    assert.equal(result.ok, true);
+    assert.equal(capturedContent, undefined);
+  });
+
+  it("validates attachment template refs", () => {
+    const flow: FlowDefinition = {
+      flow: "test-attachment-ref",
+      nodes: [
+        {
+          name: "analyze",
+          do: "ai" as const,
+          prompt: "Check",
+          attachments: ["{{ trigger.path }}"],
+          output: "result",
+        },
+      ],
+    };
+    const result = validateFlow(flow);
+    assert.equal(result.ok, true);
+  });
+});
+
+// ---- Attachments — integration (real OpenRouter calls) --------------------------------
+
+// Load .env from project root if OPENROUTER_API_KEY not already set
+if (!process.env.OPENROUTER_API_KEY) {
+  const envPath = path.join(path.dirname(new URL(import.meta.url).pathname), "../.env");
+  if (fs.existsSync(envPath)) {
+    for (const line of fs.readFileSync(envPath, "utf-8").split("\n")) {
+      const m = line.match(/^\s*([\w]+)\s*=\s*(.+?)\s*$/);
+      if (m) process.env[m[1]] = m[2];
+    }
+  }
+}
+const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY;
+const fixturesDir = path.join(path.dirname(new URL(import.meta.url).pathname), "fixtures");
+
+describe("attachments — OpenRouter integration", { skip: !OPENROUTER_KEY }, () => {
+  after(cleanup);
+
+  it("sends an image and counts people", async () => {
+    const pngPath = path.join(fixturesDir, "test.png");
+
+    const flow: FlowDefinition = {
+      flow: "integration-image",
+      nodes: [
+        {
+          name: "count",
+          do: "ai" as const,
+          prompt: "How many people are in this image? Answer with just the number.",
+          attachments: [pngPath],
+          model: "google/gemini-2.0-flash-001",
+          output: "answer",
+        },
+      ],
+    };
+
+    const runner = new FlowRunner(cfg);
+    const result = await runner.run(flow, {});
+    assert.equal(result.ok, true, `Expected ok but got error: ${result.error}`);
+    const answer = String(result.state.answer).trim().toLowerCase();
+    assert.ok(answer.includes("2") || answer.includes("two"), `Expected answer to contain "2" or "two", got: "${answer}"`);
+  });
+
+  it("structured output from image attachment", async () => {
+    const pngPath = path.join(fixturesDir, "test.png");
+
+    const flow: FlowDefinition = {
+      flow: "integration-image-schema",
+      nodes: [
+        {
+          name: "analyze",
+          do: "ai" as const,
+          prompt: "Analyze this image.",
+          attachments: [pngPath],
+          model: "google/gemini-2.0-flash-001",
+          schema: { people_count: "number", description: "string" },
+          output: "analysis",
+        },
+      ],
+    };
+
+    const runner = new FlowRunner(cfg);
+    const result = await runner.run(flow, {});
+    assert.equal(result.ok, true, `Expected ok but got error: ${result.error}`);
+    const analysis = result.state.analysis as Record<string, unknown>;
+    assert.equal(typeof analysis, "object", "Expected structured object output");
+    assert.ok("people_count" in analysis, `Missing people_count in: ${JSON.stringify(analysis)}`);
+    assert.ok("description" in analysis, `Missing description in: ${JSON.stringify(analysis)}`);
+    assert.equal(analysis.people_count, 2, `Expected people_count=2, got: ${analysis.people_count}`);
+  });
+
+  it("structured output from PDF attachment", async () => {
+    const pdfPath = path.join(fixturesDir, "test.pdf");
+
+    const flow: FlowDefinition = {
+      flow: "integration-pdf-schema",
+      nodes: [
+        {
+          name: "extract",
+          do: "ai" as const,
+          prompt: "Extract info from this PDF.",
+          attachments: [pdfPath],
+          model: "google/gemini-2.0-flash-001",
+          schema: { title: "string", page_count: "number" },
+          output: "extracted",
+        },
+      ],
+    };
+
+    const runner = new FlowRunner(cfg);
+    const result = await runner.run(flow, {});
+    assert.equal(result.ok, true, `Expected ok but got error: ${result.error}`);
+    const extracted = result.state.extracted as Record<string, unknown>;
+    assert.equal(typeof extracted, "object", "Expected structured object output");
+    assert.ok("title" in extracted, `Missing title in: ${JSON.stringify(extracted)}`);
+    assert.ok(String(extracted.title).toLowerCase().includes("smallpdf"), `Expected title to contain "smallpdf", got: ${extracted.title}`);
+  });
+
+  it("sends a PDF and reads the title", async () => {
+    const pdfPath = path.join(fixturesDir, "test.pdf");
+
+    const flow: FlowDefinition = {
+      flow: "integration-pdf",
+      nodes: [
+        {
+          name: "read-title",
+          do: "ai" as const,
+          prompt: "What is the title in this PDF? Answer with just the title text.",
+          attachments: [pdfPath],
+          model: "google/gemini-2.0-flash-001",
+          output: "title",
+        },
+      ],
+    };
+
+    const runner = new FlowRunner(cfg);
+    const result = await runner.run(flow, {});
+    assert.equal(result.ok, true, `Expected ok but got error: ${result.error}`);
+    const title = String(result.state.title).trim().toLowerCase();
+    assert.ok(title.includes("smallpdf"), `Expected title to contain "smallpdf", got: "${title}"`);
+  });
+});
+
 // ---- FlowRunner — env support -----------------------------------------------------
 
 describe("FlowRunner — env", () => {
