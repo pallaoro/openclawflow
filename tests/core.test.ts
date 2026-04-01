@@ -1390,7 +1390,7 @@ describe("attachments — OpenRouter integration", { skip: !OPENROUTER_KEY }, ()
   after(cleanup);
 
   it("sends an image and counts people", async () => {
-    const pngPath = path.join(fixturesDir, "test.png");
+    const pngPath = path.join(fixturesDir, "test.jpg");
 
     const flow: FlowDefinition = {
       flow: "integration-image",
@@ -1414,7 +1414,7 @@ describe("attachments — OpenRouter integration", { skip: !OPENROUTER_KEY }, ()
   });
 
   it("structured output from image attachment", async () => {
-    const pngPath = path.join(fixturesDir, "test.png");
+    const pngPath = path.join(fixturesDir, "test.jpg");
 
     const flow: FlowDefinition = {
       flow: "integration-image-schema",
@@ -1490,6 +1490,105 @@ describe("attachments — OpenRouter integration", { skip: !OPENROUTER_KEY }, ()
     assert.equal(result.ok, true, `Expected ok but got error: ${result.error}`);
     const title = String(result.state.title).trim().toLowerCase();
     assert.ok(title.includes("smallpdf"), `Expected title to contain "smallpdf", got: "${title}"`);
+  });
+});
+
+// ---- Anthropic integration ----------------------------------------------------------
+
+const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+
+describe("attachments — Anthropic integration", { skip: !ANTHROPIC_KEY }, () => {
+  after(cleanup);
+
+  // Temporarily hide OpenRouter key so callDirectApi falls through to Anthropic
+  let savedOR: string | undefined;
+  before(() => { savedOR = process.env.OPENROUTER_API_KEY; delete process.env.OPENROUTER_API_KEY; });
+  after(() => { if (savedOR) process.env.OPENROUTER_API_KEY = savedOR; });
+
+  it("sends an image and describes it", async () => {
+    const pngPath = path.join(fixturesDir, "test.jpg");
+    const flow: FlowDefinition = {
+      flow: "anthropic-image",
+      nodes: [
+        {
+          name: "describe",
+          do: "ai" as const,
+          prompt: "How many people are in this image? Answer with just the number.",
+          attachments: [pngPath],
+          model: "claude-sonnet-4-20250514",
+          output: "answer",
+        },
+      ],
+    };
+    const runner = new FlowRunner(cfg);
+    const result = await runner.run(flow, {});
+    assert.equal(result.ok, true, `Expected ok but got error: ${result.error}`);
+    const answer = String(result.state.answer).trim().toLowerCase();
+    assert.ok(answer.includes("2") || answer.includes("two"), `Expected "2" or "two", got: "${answer}"`);
+  });
+
+  it("sends a PDF and extracts info", async () => {
+    const pdfPath = path.join(fixturesDir, "test.pdf");
+    const flow: FlowDefinition = {
+      flow: "anthropic-pdf",
+      nodes: [
+        {
+          name: "extract",
+          do: "ai" as const,
+          prompt: "What is the title in this PDF? Answer with just the title text.",
+          attachments: [pdfPath],
+          model: "claude-sonnet-4-20250514",
+          output: "title",
+        },
+      ],
+    };
+    const runner = new FlowRunner(cfg);
+    const result = await runner.run(flow, {});
+    assert.equal(result.ok, true, `Expected ok but got error: ${result.error}`);
+    const title = String(result.state.title).trim().toLowerCase();
+    assert.ok(title.includes("smallpdf"), `Expected title to contain "smallpdf", got: "${title}"`);
+  });
+});
+
+// ---- OpenAI integration -------------------------------------------------------------
+
+const OPENAI_KEY = process.env.OPENAI_API_KEY;
+
+describe("attachments — OpenAI integration", { skip: !OPENAI_KEY }, () => {
+  after(cleanup);
+
+  // Temporarily hide OpenRouter + Anthropic keys so callDirectApi falls through to OpenAI
+  let savedOR: string | undefined;
+  let savedAnthropic: string | undefined;
+  before(() => {
+    savedOR = process.env.OPENROUTER_API_KEY; delete process.env.OPENROUTER_API_KEY;
+    savedAnthropic = process.env.ANTHROPIC_API_KEY; delete process.env.ANTHROPIC_API_KEY;
+  });
+  after(() => {
+    if (savedOR) process.env.OPENROUTER_API_KEY = savedOR;
+    if (savedAnthropic) process.env.ANTHROPIC_API_KEY = savedAnthropic;
+  });
+
+  it("sends an image and describes it", async () => {
+    const pngPath = path.join(fixturesDir, "test.jpg");
+    const flow: FlowDefinition = {
+      flow: "openai-image",
+      nodes: [
+        {
+          name: "describe",
+          do: "ai" as const,
+          prompt: "How many people are in this image? Answer with just the number.",
+          attachments: [pngPath],
+          model: "gpt-4o-mini",
+          output: "answer",
+        },
+      ],
+    };
+    const runner = new FlowRunner(cfg);
+    const result = await runner.run(flow, {});
+    assert.equal(result.ok, true, `Expected ok but got error: ${result.error}`);
+    const answer = String(result.state.answer).trim().toLowerCase();
+    assert.ok(answer.includes("2") || answer.includes("two"), `Expected "2" or "two", got: "${answer}"`);
   });
 });
 
