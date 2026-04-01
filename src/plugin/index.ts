@@ -886,9 +886,9 @@ Examples:
                 `Cannot set "${key}". Allowed fields: ${allowed.join(", ")}. Use "update" to modify nodes.`,
               );
             if (value === null || value === undefined) {
-              delete (flowDef as Record<string, unknown>)[key];
+              delete (flowDef as unknown as Record<string, unknown>)[key];
             } else {
-              (flowDef as Record<string, unknown>)[key] = value;
+              (flowDef as unknown as Record<string, unknown>)[key] = value;
             }
           }
 
