@@ -1397,7 +1397,11 @@ export class FlowRunner {
   private execCode(node: CodeNode, state: FlowState): { output: unknown } {
     // Support both plain dotted paths ("plan.field") and template syntax ("{{ plan.field }}")
     const rawInput = node.input ? this.resolveBodyObject(node.input, state) : undefined;
-    const input = typeof rawInput === "string" ? this.getPath(state, rawInput) : rawInput;
+    const input = typeof rawInput === "string"
+      ? this.getPath(state, rawInput)
+      : rawInput !== null && typeof rawInput === "object" && !Array.isArray(rawInput)
+        ? this.resolveCodeInputObject(rawInput as Record<string, unknown>, state)
+        : rawInput;
 
     const multiStatement = this.isMultiStatement(node.run);
     const body = multiStatement
@@ -1446,6 +1450,41 @@ export class FlowRunner {
         `code "${node.name}": runtime error — ${msg}.${hint}`,
       );
     }
+  }
+
+  /**
+   * Resolve an object-style `input` for code nodes.
+   * Each string value is resolved as a state path (plain or wildcard).
+   * Values already resolved by resolveBodyObject (non-strings) pass through.
+   */
+  private resolveCodeInputObject(
+    obj: Record<string, unknown>,
+    state: FlowState,
+  ): Record<string, unknown> {
+    const result: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (typeof v === "string") {
+        // Check for wildcard: path[*] or path[*].field
+        const wcMatch = v.match(/^([\w.]+)\[\*\](?:\.([\w.]+))?$/);
+        if (wcMatch) {
+          const arr = this.getPath(state, wcMatch[1]);
+          if (Array.isArray(arr)) {
+            result[k] = wcMatch[2]
+              ? arr.map((item: unknown) => this.getPath(item, wcMatch[2]))
+              : arr;
+          } else {
+            result[k] = v;
+          }
+        } else {
+          // Plain dotted path
+          const resolved = this.getPath(state, v);
+          result[k] = resolved !== undefined ? resolved : v;
+        }
+      } else {
+        result[k] = v;
+      }
+    }
+    return result;
   }
 
   // ---- do: exec ----------------------------------------------------------------
