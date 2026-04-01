@@ -9,7 +9,7 @@ import type { FlowDefinition, FlowNode, PluginConfig } from "../core/types.js";
 //
 //   flow_create        — create a new flow definition and save to file
 //   flow_delete        — soft-delete a flow (moves to .bin/)
-//   flow_restore       — restore a flow from the bin or list bin contents
+//   flow_revert_from_bin       — restore a flow from the bin or list bin contents
 //   flow_run           — execute a flow (inline or from file)
 //   flow_resume        — resume after approval gate
 //   flow_send_event    — push an event into a waiting flow
@@ -194,7 +194,7 @@ All nodes require "name" and "do". Templates: {{ outputKey.field }}.`,
       description: `Delete a flow file by moving it to the bin.
 
 The flow is not permanently removed — it is timestamped and moved to
-workspace/.clawflow/bin/ so it can be restored later with flow_restore.
+workspace/.clawflow/bin/ so it can be restored later with flow_revert_from_bin.
 Safe for agents to call without fear of data loss.`,
 
       parameters: {
@@ -255,11 +255,11 @@ Safe for agents to call without fear of data loss.`,
     { optional: true },
   );
 
-  // ---- flow_restore -------------------------------------------------------------
+  // ---- flow_revert_from_bin -------------------------------------------------------------
 
   api.registerTool(
     {
-      name: "flow_restore",
+      name: "flow_revert_from_bin",
       description: `Restore a flow from the bin or list bin contents.
 
 Without "name", lists all flows in workspace/.clawflow/bin/ with their timestamps.
@@ -729,6 +729,7 @@ Actions:
   add     — insert a new node at a position (default: end)
   remove  — remove a node by name
   move    — move a node to a new position
+  revert  — undo the last edit (restores the previous version from history)
   list    — list all nodes with index, name, type, and output key
 
 The edited flow is validated after every mutation. If validation fails, the
@@ -767,7 +768,7 @@ Examples:
           },
           action: {
             type: "string",
-            enum: ["set", "update", "add", "remove", "move", "list"],
+            enum: ["set", "update", "add", "remove", "move", "revert", "list"],
           },
           node: {
             type: "string",
@@ -800,7 +801,7 @@ Examples:
         params: {
           file?: string;
           flow?: FlowDefinition;
-          action: "set" | "update" | "add" | "remove" | "move" | "list";
+          action: "set" | "update" | "add" | "remove" | "move" | "revert" | "list";
           node?: string;
           fields?: Record<string, unknown>;
           replace?: FlowNode;
@@ -813,17 +814,18 @@ Examples:
         let filePath: string | undefined;
 
         if (params.file) {
-          const { readFileSync, existsSync } = await import("fs");
+          const fs = await import("fs");
+          const pathMod = await import("path");
           const base = process.env.OPENCLAW_WORKSPACE ?? process.cwd();
           const abs = params.file.startsWith("/")
             ? params.file
-            : `${base}/${params.file}`;
-          if (!existsSync(abs))
+            : pathMod.join(base, params.file);
+          if (!fs.existsSync(abs))
             return {
               content: [{ type: "text", text: `File not found: ${abs}` }],
             };
           filePath = abs;
-          flowDef = JSON.parse(readFileSync(abs, "utf8")) as FlowDefinition;
+          flowDef = JSON.parse(fs.readFileSync(abs, "utf8")) as FlowDefinition;
         } else if (params.flow) {
           flowDef = params.flow;
         } else {
@@ -847,6 +849,47 @@ Examples:
 
         const findIndex = (name: string) =>
           flowDef.nodes.findIndex((n) => n.name === name);
+
+        // Save a snapshot before mutating (file-based flows only)
+        const saveSnapshot = async () => {
+          if (!filePath) return;
+          const fs = await import("fs");
+          const pathMod = await import("path");
+          const base = process.env.OPENCLAW_WORKSPACE ?? process.cwd();
+          const flowName = pathMod.basename(filePath, ".json");
+          const histDir = pathMod.join(base, ".clawflow", "history", flowName);
+          fs.mkdirSync(histDir, { recursive: true });
+          const ts = new Date().toISOString().replace(/[:.]/g, "-");
+          const snapPath = pathMod.join(histDir, `${ts}.json`);
+          fs.writeFileSync(snapPath, fs.readFileSync(filePath, "utf8"));
+        };
+
+        // ---- Revert (undo last edit) ---
+        if (params.action === "revert") {
+          if (!filePath)
+            return fail("Revert only works on file-based flows.");
+          const fs = await import("fs");
+          const pathMod = await import("path");
+          const base = process.env.OPENCLAW_WORKSPACE ?? process.cwd();
+          const flowName = pathMod.basename(filePath, ".json");
+          const histDir = pathMod.join(base, ".clawflow", "history", flowName);
+          if (!fs.existsSync(histDir))
+            return fail("No edit history found for this flow.");
+          const snaps = fs.readdirSync(histDir)
+            .filter((f: string) => f.endsWith(".json"))
+            .sort()
+            .reverse();
+          if (snaps.length === 0)
+            return fail("No edit history found for this flow.");
+          const latest = pathMod.join(histDir, snaps[0]);
+          const restored = JSON.parse(fs.readFileSync(latest, "utf8")) as FlowDefinition;
+          fs.writeFileSync(filePath, JSON.stringify(restored, null, 2) + "\n");
+          fs.unlinkSync(latest);
+          return ok(
+            `Reverted to snapshot ${snaps[0]}. File written: ${filePath}`,
+            restored,
+          );
+        }
 
         // ---- Set (top-level flow fields) ---
         if (params.action === "set") {
@@ -878,6 +921,7 @@ Examples:
           }
 
           if (filePath) {
+            await saveSnapshot();
             const { writeFileSync } = await import("fs");
             writeFileSync(filePath, JSON.stringify(flowDef, null, 2) + "\n");
           }
@@ -931,6 +975,7 @@ Examples:
             );
 
           if (filePath) {
+            await saveSnapshot();
             const { writeFileSync } = await import("fs");
             writeFileSync(filePath, JSON.stringify(flowDef, null, 2) + "\n");
           }
@@ -960,6 +1005,7 @@ Examples:
           }
 
           if (filePath) {
+            await saveSnapshot();
             const { writeFileSync } = await import("fs");
             writeFileSync(filePath, JSON.stringify(flowDef, null, 2) + "\n");
           }
@@ -988,6 +1034,7 @@ Examples:
           }
 
           if (filePath) {
+            await saveSnapshot();
             const { writeFileSync } = await import("fs");
             writeFileSync(filePath, JSON.stringify(flowDef, null, 2) + "\n");
           }
@@ -1022,6 +1069,7 @@ Examples:
           }
 
           if (filePath) {
+            await saveSnapshot();
             const { writeFileSync } = await import("fs");
             writeFileSync(filePath, JSON.stringify(flowDef, null, 2) + "\n");
           }
