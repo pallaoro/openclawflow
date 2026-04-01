@@ -2,7 +2,7 @@ import { FlowRunner, sendEvent } from "../core/runner.js";
 import { transpileToCloudflare } from "../core/transpile.js";
 import { startWebhookServer } from "../core/serve.js";
 import { validateFlow } from "../core/validate.js";
-import type { FlowDefinition, FlowNode, PluginConfig } from "../core/types.js";
+import type { FlowDefinition, FlowNode, PluginConfig, BranchNode, ConditionNode, LoopNode, ParallelNode } from "../core/types.js";
 
 // ---- OpenClaw Plugin: clawflow ---------------------------------------------------
 // Registers nine tools:
@@ -728,9 +728,19 @@ Actions:
   update  — update a node entirely or patch specific fields by node name
   add     — insert a new node at a position (default: end)
   remove  — remove a node by name
-  move    — move a node to a new position
+  move    — move a node to a new position (same level or into a parent)
+  wrap    — wrap one or more nodes into a new container (loop, condition, branch, parallel)
   revert  — undo the last edit (restores the previous version from history)
   list    — list all nodes with index, name, type, and output key
+
+All actions that target nodes (update, remove, move, add) search recursively
+through nested structures (branch paths, condition then/else, loop, parallel).
+
+The "parent" parameter targets a nested node list using slash-separated paths:
+  "myBranch/true"       → branch "myBranch", path "true"
+  "myCond/then"         → condition "myCond", then block
+  "myLoop"              → loop "myLoop", child nodes
+  "outer/true/inner"    → chained nesting
 
 The edited flow is validated after every mutation. If validation fails, the
 edit is rejected and errors are returned. For file-based flows, the file is
@@ -741,8 +751,10 @@ Examples:
   Update one field:   { action: "update", node: "classify", fields: { prompt: "New prompt" } }
   Replace full node:  { action: "update", node: "classify", replace: { name: "classify", do: "ai", prompt: "..." } }
   Add at position:    { action: "add", position: 2, nodeDefinition: { name: "step3", do: "code", run: "..." } }
+  Add inside branch:  { action: "add", parent: "shouldUpdate/true", nodeDefinition: { name: "step3", do: "code", run: "..." } }
   Remove:             { action: "remove", node: "old-step" }
-  Move:               { action: "move", node: "step3", position: 0 }
+  Move into loop:     { action: "move", node: "step3", parent: "myLoop", position: 0 }
+  Wrap in loop:       { action: "wrap", nodes: ["step1", "step2"], wrapper: { name: "myLoop", do: "loop", over: "items", as: "item" } }
   List:               { action: "list" }`,
 
       parameters: {
@@ -768,11 +780,11 @@ Examples:
           },
           action: {
             type: "string",
-            enum: ["set", "update", "add", "remove", "move", "revert", "list"],
+            enum: ["set", "update", "add", "remove", "move", "wrap", "revert", "list"],
           },
           node: {
             type: "string",
-            description: "Node name to target (required for update, remove, move)",
+            description: "Node name to target (required for update, remove, move). Searched recursively through nested structures.",
           },
           fields: {
             type: "object",
@@ -793,6 +805,20 @@ Examples:
             type: "number",
             description: "For action=add/move: index to insert/move to (0-based). Default: end.",
           },
+          parent: {
+            type: "string",
+            description: 'For action=add/move: target a nested node list. Slash-separated path e.g. "myBranch/true", "myCond/then", "myLoop". For move: destination parent (node is removed from current location and inserted here).',
+          },
+          nodes: {
+            type: "array",
+            items: { type: "string" },
+            description: "For action=wrap: array of node names to wrap into a container.",
+          },
+          wrapper: {
+            type: "object",
+            additionalProperties: true,
+            description: "For action=wrap: the container node definition (must include name, do). Wrapped nodes become its children (e.g. loop.nodes, condition.then, branch.paths.true, parallel.nodes).",
+          },
         },
       },
 
@@ -801,12 +827,15 @@ Examples:
         params: {
           file?: string;
           flow?: FlowDefinition;
-          action: "set" | "update" | "add" | "remove" | "move" | "revert" | "list";
+          action: "set" | "update" | "add" | "remove" | "move" | "wrap" | "revert" | "list";
           node?: string;
           fields?: Record<string, unknown>;
           replace?: FlowNode;
           nodeDefinition?: FlowNode;
           position?: number;
+          parent?: string;
+          nodes?: string[];
+          wrapper?: FlowNode;
         },
       ) {
         // ---- Load flow definition ---
@@ -847,8 +876,127 @@ Examples:
           content: [{ type: "text", text: msg }],
         });
 
-        const findIndex = (name: string) =>
-          flowDef.nodes.findIndex((n) => n.name === name);
+        // Resolve a node list from a parent path. Supports:
+        //   undefined        → flowDef.nodes (top-level)
+        //   "myBranch/true"  → branch node "myBranch", paths["true"]
+        //   "myBranch/default" → branch node "myBranch", default
+        //   "myCond/then"    → condition node "myCond", then
+        //   "myCond/else"    → condition node "myCond", else
+        //   "myLoop"         → loop node "myLoop", nodes
+        //   "myParallel"     → parallel node "myParallel", nodes
+        // Paths can be chained: "outerBranch/true/innerLoop"
+        const resolveNodeList = (
+          parentPath?: string,
+        ): { nodes: FlowNode[]; error?: string } => {
+          if (!parentPath) return { nodes: flowDef.nodes };
+
+          const parts = parentPath.split("/");
+          let current: FlowNode[] = flowDef.nodes;
+
+          for (let i = 0; i < parts.length; i++) {
+            const part = parts[i];
+            const node = current.find((n) => n.name === part);
+            if (!node)
+              return {
+                nodes: [],
+                error: `Parent node "${part}" not found at level ${i}.`,
+              };
+
+            if (node.do === "branch") {
+              const b = node as BranchNode;
+              const key = parts[++i]; // consume next part as path key
+              if (!key)
+                return {
+                  nodes: [],
+                  error: `Branch "${part}" requires a path key (e.g., "${part}/true").`,
+                };
+              if (key === "default") {
+                if (!b.default) b.default = [];
+                current = b.default;
+              } else {
+                if (!b.paths[key]) b.paths[key] = [];
+                current = b.paths[key];
+              }
+            } else if (node.do === "condition") {
+              const c = node as ConditionNode;
+              const key = parts[++i]; // consume next part as then/else
+              if (!key)
+                return {
+                  nodes: [],
+                  error: `Condition "${part}" requires "then" or "else" (e.g., "${part}/then").`,
+                };
+              if (key === "then") {
+                current = c.then;
+              } else if (key === "else") {
+                if (!c.else) c.else = [];
+                current = c.else;
+              } else {
+                return {
+                  nodes: [],
+                  error: `Condition "${part}" only accepts "then" or "else", got "${key}".`,
+                };
+              }
+            } else if (node.do === "loop") {
+              current = (node as LoopNode).nodes;
+            } else if (node.do === "parallel") {
+              current = (node as ParallelNode).nodes;
+            } else {
+              return {
+                nodes: [],
+                error: `Node "${part}" (do: "${node.do}") has no child nodes.`,
+              };
+            }
+          }
+          return { nodes: current };
+        };
+
+        // Find a node by name, optionally scoped to a parent path
+        const findIndex = (name: string, parentPath?: string) => {
+          const { nodes, error } = resolveNodeList(parentPath);
+          if (error) return -1;
+          return nodes.findIndex((n) => n.name === name);
+        };
+
+        // Deep-find: search all node lists recursively, return the containing array + index
+        const deepFind = (
+          name: string,
+          nodes: FlowNode[] = flowDef.nodes,
+        ): { list: FlowNode[]; index: number } | null => {
+          const idx = nodes.findIndex((n) => n.name === name);
+          if (idx !== -1) return { list: nodes, index: idx };
+          for (const node of nodes) {
+            const children = getChildLists(node);
+            for (const child of children) {
+              const found = deepFind(name, child);
+              if (found) return found;
+            }
+          }
+          return null;
+        };
+
+        // Get all child node arrays from a container node
+        const getChildLists = (node: FlowNode): FlowNode[][] => {
+          switch (node.do) {
+            case "branch": {
+              const b = node as BranchNode;
+              const lists = Object.values(b.paths);
+              if (b.default) lists.push(b.default);
+              return lists;
+            }
+            case "condition": {
+              const c = node as ConditionNode;
+              const lists: FlowNode[][] = [c.then];
+              if (c.else) lists.push(c.else);
+              return lists;
+            }
+            case "loop":
+              return [(node as LoopNode).nodes];
+            case "parallel":
+              return [(node as ParallelNode).nodes];
+            default:
+              return [];
+          }
+        };
 
         // Save a snapshot before mutating (file-based flows only)
         const saveSnapshot = async () => {
@@ -951,15 +1099,15 @@ Examples:
         if (params.action === "update") {
           if (!params.node)
             return fail('action "update" requires "node" (node name).');
-          const idx = findIndex(params.node);
-          if (idx === -1)
+          const found = deepFind(params.node);
+          if (!found)
             return fail(`Node "${params.node}" not found.`);
 
           if (params.replace) {
-            flowDef.nodes[idx] = params.replace as FlowNode;
+            found.list[found.index] = params.replace as FlowNode;
           } else if (params.fields) {
-            flowDef.nodes[idx] = {
-              ...flowDef.nodes[idx],
+            found.list[found.index] = {
+              ...found.list[found.index],
               ...params.fields,
             } as FlowNode;
           } else {
@@ -989,16 +1137,18 @@ Examples:
         if (params.action === "add") {
           if (!params.nodeDefinition)
             return fail('action "add" requires "nodeDefinition".');
-          const pos = params.position ?? flowDef.nodes.length;
-          if (pos < 0 || pos > flowDef.nodes.length)
+          const { nodes: targetList, error: parentErr } = resolveNodeList(params.parent);
+          if (parentErr) return fail(parentErr);
+          const pos = params.position ?? targetList.length;
+          if (pos < 0 || pos > targetList.length)
             return fail(
-              `Position ${pos} out of range (0-${flowDef.nodes.length}).`,
+              `Position ${pos} out of range (0-${targetList.length}).`,
             );
-          flowDef.nodes.splice(pos, 0, params.nodeDefinition as FlowNode);
+          targetList.splice(pos, 0, params.nodeDefinition as FlowNode);
 
           const validation = validateFlow(flowDef);
           if (!validation.ok) {
-            flowDef.nodes.splice(pos, 1); // rollback
+            targetList.splice(pos, 1); // rollback
             return fail(
               `Validation failed after add:\n${validation.errors.map((e) => `  - ${e.message}`).join("\n")}`,
             );
@@ -1009,8 +1159,9 @@ Examples:
             const { writeFileSync } = await import("fs");
             writeFileSync(filePath, JSON.stringify(flowDef, null, 2) + "\n");
           }
+          const loc = params.parent ? ` in ${params.parent}` : "";
           return ok(
-            `Node "${params.nodeDefinition.name}" added at position ${pos}.${filePath ? ` File written: ${filePath}` : ""}`,
+            `Node "${params.nodeDefinition.name}" added at position ${pos}${loc}.${filePath ? ` File written: ${filePath}` : ""}`,
             flowDef,
           );
         }
@@ -1019,15 +1170,15 @@ Examples:
         if (params.action === "remove") {
           if (!params.node)
             return fail('action "remove" requires "node" (node name).');
-          const idx = findIndex(params.node);
-          if (idx === -1)
+          const found = deepFind(params.node);
+          if (!found)
             return fail(`Node "${params.node}" not found.`);
 
-          const removed = flowDef.nodes.splice(idx, 1)[0];
+          const removed = found.list.splice(found.index, 1)[0];
 
           const validation = validateFlow(flowDef);
           if (!validation.ok) {
-            flowDef.nodes.splice(idx, 0, removed); // rollback
+            found.list.splice(found.index, 0, removed); // rollback
             return fail(
               `Validation failed after remove (rolled back):\n${validation.errors.map((e) => `  - ${e.message}`).join("\n")}`,
             );
@@ -1050,19 +1201,26 @@ Examples:
             return fail('action "move" requires "node" (node name).');
           if (params.position === undefined)
             return fail('action "move" requires "position".');
-          const idx = findIndex(params.node);
-          if (idx === -1)
+
+          // Find the node wherever it is
+          const source = deepFind(params.node);
+          if (!source)
             return fail(`Node "${params.node}" not found.`);
 
-          const [moved] = flowDef.nodes.splice(idx, 1);
-          const pos = Math.min(params.position, flowDef.nodes.length);
-          flowDef.nodes.splice(pos, 0, moved);
+          // Resolve destination list
+          const { nodes: destList, error: parentErr } = resolveNodeList(params.parent);
+          if (parentErr) return fail(parentErr);
+
+          // Remove from source
+          const [moved] = source.list.splice(source.index, 1);
+          const pos = Math.min(params.position, destList.length);
+          destList.splice(pos, 0, moved);
 
           const validation = validateFlow(flowDef);
           if (!validation.ok) {
-            // rollback: remove from new pos, re-insert at old
-            flowDef.nodes.splice(pos, 1);
-            flowDef.nodes.splice(idx, 0, moved);
+            // rollback: remove from dest, re-insert at source
+            destList.splice(pos, 1);
+            source.list.splice(source.index, 0, moved);
             return fail(
               `Validation failed after move (rolled back):\n${validation.errors.map((e) => `  - ${e.message}`).join("\n")}`,
             );
@@ -1073,8 +1231,96 @@ Examples:
             const { writeFileSync } = await import("fs");
             writeFileSync(filePath, JSON.stringify(flowDef, null, 2) + "\n");
           }
+          const loc = params.parent ? ` in ${params.parent}` : "";
           return ok(
-            `Node "${params.node}" moved to position ${pos}.${filePath ? ` File written: ${filePath}` : ""}`,
+            `Node "${params.node}" moved to position ${pos}${loc}.${filePath ? ` File written: ${filePath}` : ""}`,
+            flowDef,
+          );
+        }
+
+        // ---- Wrap ---
+        if (params.action === "wrap") {
+          if (!params.nodes || params.nodes.length === 0)
+            return fail('action "wrap" requires "nodes" (array of node names).');
+          if (!params.wrapper)
+            return fail('action "wrap" requires "wrapper" (container node definition with name and do).');
+          if (!["loop", "condition", "branch", "parallel"].includes(params.wrapper.do))
+            return fail(
+              `Wrapper "do" must be loop, condition, branch, or parallel. Got "${params.wrapper.do}".`,
+            );
+
+          // All target nodes must be in the same parent list and contiguous
+          const firstFound = deepFind(params.nodes[0]);
+          if (!firstFound)
+            return fail(`Node "${params.nodes[0]}" not found.`);
+
+          const parentList = firstFound.list;
+          const indices: number[] = [];
+          for (const name of params.nodes) {
+            const idx = parentList.findIndex((n) => n.name === name);
+            if (idx === -1)
+              return fail(
+                `Node "${name}" not found in the same parent list as "${params.nodes[0]}".`,
+              );
+            indices.push(idx);
+          }
+          indices.sort((a, b) => a - b);
+
+          // Check contiguous
+          for (let i = 1; i < indices.length; i++) {
+            if (indices[i] !== indices[i - 1] + 1)
+              return fail(
+                "Nodes to wrap must be contiguous (adjacent in the same list).",
+              );
+          }
+
+          // Extract the nodes
+          const extracted = parentList.splice(indices[0], indices.length);
+
+          // Build the wrapper node with children
+          const wrapperNode = { ...params.wrapper } as FlowNode;
+          switch (wrapperNode.do) {
+            case "loop":
+              (wrapperNode as LoopNode).nodes = extracted;
+              break;
+            case "parallel":
+              (wrapperNode as ParallelNode).nodes = extracted;
+              break;
+            case "condition":
+              (wrapperNode as ConditionNode).then = extracted;
+              if (!(wrapperNode as ConditionNode).else)
+                (wrapperNode as ConditionNode).else = [];
+              break;
+            case "branch": {
+              const b = wrapperNode as BranchNode;
+              // Put extracted nodes into the first path, or "true" by default
+              const firstPath = b.paths ? Object.keys(b.paths)[0] : "true";
+              if (!b.paths) b.paths = {};
+              b.paths[firstPath] = extracted;
+              break;
+            }
+          }
+
+          // Insert wrapper where the first extracted node was
+          parentList.splice(indices[0], 0, wrapperNode);
+
+          const validation = validateFlow(flowDef);
+          if (!validation.ok) {
+            // rollback: remove wrapper, re-insert extracted nodes
+            parentList.splice(indices[0], 1);
+            parentList.splice(indices[0], 0, ...extracted);
+            return fail(
+              `Validation failed after wrap (rolled back):\n${validation.errors.map((e) => `  - ${e.message}`).join("\n")}`,
+            );
+          }
+
+          if (filePath) {
+            await saveSnapshot();
+            const { writeFileSync } = await import("fs");
+            writeFileSync(filePath, JSON.stringify(flowDef, null, 2) + "\n");
+          }
+          return ok(
+            `Wrapped ${params.nodes.length} node(s) into "${params.wrapper.name}" (${params.wrapper.do}).${filePath ? ` File written: ${filePath}` : ""}`,
             flowDef,
           );
         }

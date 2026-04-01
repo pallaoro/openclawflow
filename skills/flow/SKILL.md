@@ -241,14 +241,21 @@ Loop output is an array of sub-states. Use wildcard to extract specific fields:
 {{ process_sheets[*].pdfPath }}  → ["/output/a.pdf", "/output/b.pdf"]
 ```
 
-### Condition expressions
+### Condition and branch expressions
 
-The `if` field in condition nodes supports JS expressions with dotted paths:
+The `if` field in condition nodes supports JS expressions with dotted paths. Both bare paths and `{{ }}` template syntax work:
 
 ```
 "extractOrder.transport_type == 'CLIENTE'"
+"{{ check.has_new_version }}"
 "validation.valid && items.length > 0"
-"trigger.priority == 'high' || trigger.urgent == true"
+```
+
+The `on` field in branch nodes resolves a dotted path to match against `paths` keys. Both bare paths and `{{ }}` work:
+
+```json
+{ "do": "branch", "on": "check.status", "paths": { "ok": [...], "error": [...] } }
+{ "do": "branch", "on": "{{ check.has_changes }}", "paths": { "true": [...], "false": [...] } }
 ```
 
 ### Design principle: AI at the edges, determinism at the center
@@ -425,7 +432,7 @@ flow_run with file: "flows/linkedin-post.json", input: { "topic": "..." }
 | `flow_create` | Create a new flow definition and save it to a JSON file |
 | `flow_delete` | Soft-delete a flow (moves to `.clawflow/bin/` with timestamp) |
 | `flow_restore` | List bin contents or restore a deleted flow |
-| `flow_edit` | Edit a flow: set top-level fields (description, trigger, env, version) or modify nodes (update, add, remove, move, list) |
+| `flow_edit` | Edit a flow: set top-level fields, modify nodes (update, add, remove, move, wrap, list). All actions search recursively through nested structures. Use `parent` to target nested node lists (e.g. `"myBranch/true"`, `"myLoop"`). Use `wrap` to wrap nodes into a new container (loop, condition, branch, parallel). |
 | `flow_resume` | Resume a paused flow after approval (`instanceId`, `approved: true/false`, `flow`) |
 | `flow_send_event` | Push an event into a waiting flow (`instanceId`, `eventType`, `payload`) |
 | `flow_status` | Check status of a flow instance or list all instances |
