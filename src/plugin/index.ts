@@ -5,8 +5,11 @@ import { validateFlow } from "../core/validate.js";
 import type { FlowDefinition, FlowNode, PluginConfig } from "../core/types.js";
 
 // ---- OpenClaw Plugin: clawflow ---------------------------------------------------
-// Registers six tools:
+// Registers nine tools:
 //
+//   flow_create        — create a new flow definition and save to file
+//   flow_delete        — soft-delete a flow (moves to .bin/)
+//   flow_restore       — restore a flow from the bin or list bin contents
 //   flow_run           — execute a flow (inline or from file)
 //   flow_resume        — resume after approval gate
 //   flow_send_event    — push an event into a waiting flow
@@ -74,6 +77,312 @@ function register(api: PluginApi) {
       logger: api.logger,
     });
   }
+
+  // ---- flow_create --------------------------------------------------------------
+
+  api.registerTool(
+    {
+      name: "flow_create",
+      description: `Create a new clawflow definition and save it to a JSON file.
+
+Builds a FlowDefinition from the provided parameters, validates it, and writes
+it to disk. Use this to scaffold a new flow file; use flow_edit to modify it
+afterwards and flow_run to execute it.
+
+Node types:
+  ai, agent, branch, condition, loop, parallel, http, memory, wait, sleep, code, exec
+
+All nodes require "name" and "do". Templates: {{ outputKey.field }}.`,
+
+      parameters: {
+        type: "object",
+        required: ["file", "flow", "nodes"],
+        properties: {
+          file: {
+            type: "string",
+            description:
+              "Filename or path for the new flow file. Plain names like \"my-flow\" are saved to workspace/flows/my-flow.json. Paths with slashes are resolved relative to the workspace.",
+          },
+          flow: {
+            type: "string",
+            description: "Unique flow name",
+          },
+          description: {
+            type: "string",
+            description: "Human-readable description of what the flow does",
+          },
+          nodes: {
+            type: "array",
+            items: { type: "object", additionalProperties: true },
+            description: "Array of node definitions",
+          },
+          trigger: {
+            type: "object",
+            additionalProperties: true,
+            description:
+              'Trigger configuration: { on: "webhook"|"cron"|"manual"|"event", schedule?, from? }',
+          },
+          env: {
+            type: "object",
+            additionalProperties: true,
+            description: "Environment variable defaults",
+          },
+          version: {
+            type: "string",
+            description: 'Semver version string, e.g. "1.0.0"',
+          },
+        },
+      },
+
+      async execute(
+        _id: string,
+        params: {
+          file: string;
+          flow: string;
+          description?: string;
+          nodes: FlowNode[];
+          trigger?: FlowDefinition["trigger"];
+          env?: Record<string, string | null>;
+          version?: string;
+        },
+      ) {
+        const fs = await import("fs");
+        const path = await import("path");
+
+        const base = process.env.OPENCLAW_WORKSPACE ?? process.cwd();
+
+        let abs: string;
+        if (params.file.startsWith("/")) {
+          abs = params.file;
+        } else if (params.file.includes("/")) {
+          // Relative path with directory — resolve from workspace root
+          abs = `${base}/${params.file}`;
+        } else {
+          // Plain name — put in workspace/flows/
+          const name = params.file.replace(/\.json$/, "");
+          abs = `${base}/flows/${name}.json`;
+        }
+
+        if (fs.existsSync(abs))
+          return {
+            content: [
+              {
+                type: "text",
+                text: `File already exists: ${abs}. Use flow_edit to modify it.`,
+              },
+            ],
+          };
+
+        const flowDef: FlowDefinition = {
+          flow: params.flow,
+          ...(params.version && { version: params.version }),
+          ...(params.description && { description: params.description }),
+          ...(params.trigger && { trigger: params.trigger }),
+          ...(params.env && { env: params.env }),
+          nodes: params.nodes,
+        };
+
+        const validation = validateFlow(flowDef);
+        if (!validation.ok)
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Validation failed:\n${validation.errors.map((e) => `  - ${e.message}`).join("\n")}`,
+              },
+            ],
+          };
+
+        fs.mkdirSync(path.dirname(abs), { recursive: true });
+        fs.writeFileSync(abs, JSON.stringify(flowDef, null, 2) + "\n");
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Flow "${params.flow}" created at ${abs}`,
+            },
+          ],
+          details: flowDef,
+        };
+      },
+    },
+    { optional: true },
+  );
+
+  // ---- flow_delete --------------------------------------------------------------
+
+  api.registerTool(
+    {
+      name: "flow_delete",
+      description: `Delete a flow file by moving it to the bin.
+
+The flow is not permanently removed — it is timestamped and moved to
+workspace/.clawflow/bin/ so it can be restored later with flow_restore.
+Safe for agents to call without fear of data loss.`,
+
+      parameters: {
+        type: "object",
+        required: ["file"],
+        properties: {
+          file: {
+            type: "string",
+            description:
+              "Filename or path of the flow to delete. Plain names like \"my-flow\" resolve to workspace/flows/my-flow.json.",
+          },
+        },
+      },
+
+      async execute(
+        _id: string,
+        params: { file: string },
+      ) {
+        const fs = await import("fs");
+        const path = await import("path");
+
+        const base = process.env.OPENCLAW_WORKSPACE ?? process.cwd();
+
+        let abs: string;
+        if (params.file.startsWith("/")) {
+          abs = params.file;
+        } else if (params.file.includes("/")) {
+          abs = `${base}/${params.file}`;
+        } else {
+          const name = params.file.replace(/\.json$/, "");
+          abs = `${base}/flows/${name}.json`;
+        }
+
+        if (!fs.existsSync(abs))
+          return {
+            content: [{ type: "text", text: `File not found: ${abs}` }],
+          };
+
+        const binDir = `${base}/.clawflow/bin`;
+        fs.mkdirSync(binDir, { recursive: true });
+
+        const basename = path.basename(abs, ".json");
+        const ts = new Date().toISOString().replace(/[:.]/g, "-");
+        const binPath = `${binDir}/${basename}.${ts}.json`;
+
+        fs.renameSync(abs, binPath);
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Flow moved to bin: ${binPath}`,
+            },
+          ],
+        };
+      },
+    },
+    { optional: true },
+  );
+
+  // ---- flow_restore -------------------------------------------------------------
+
+  api.registerTool(
+    {
+      name: "flow_restore",
+      description: `Restore a flow from the bin or list bin contents.
+
+Without "name", lists all flows in workspace/.clawflow/bin/ with their timestamps.
+With "name", restores the most recent version of that flow back to the flows/
+directory. If the flow file already exists, the restore is rejected.`,
+
+      parameters: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description:
+              "Flow name to restore (without timestamp). Omit to list all bin contents.",
+          },
+        },
+      },
+
+      async execute(
+        _id: string,
+        params: { name?: string },
+      ) {
+        const fs = await import("fs");
+        const path = await import("path");
+
+        const base = process.env.OPENCLAW_WORKSPACE ?? process.cwd();
+        const binDir = `${base}/.clawflow/bin`;
+
+        if (!fs.existsSync(binDir))
+          return {
+            content: [{ type: "text", text: "Bin is empty." }],
+          };
+
+        const files = fs.readdirSync(binDir)
+          .filter((f: string) => f.endsWith(".json"))
+          .sort()
+          .reverse();
+
+        if (files.length === 0)
+          return {
+            content: [{ type: "text", text: "Bin is empty." }],
+          };
+
+        // ---- List mode ---
+        if (!params.name) {
+          const entries = files.map((f: string) => {
+            const match = f.match(/^(.+?)\.(\d{4}-.+)\.json$/);
+            return {
+              name: match?.[1] ?? f,
+              deletedAt: match?.[2] ?? "unknown",
+              file: f,
+            };
+          });
+          return {
+            content: [
+              { type: "text", text: JSON.stringify(entries, null, 2) },
+            ],
+            details: entries,
+          };
+        }
+
+        // ---- Restore mode ---
+        const prefix = params.name.replace(/\.json$/, "");
+        const match = files.find((f: string) => f.startsWith(`${prefix}.`));
+
+        if (!match)
+          return {
+            content: [
+              {
+                type: "text",
+                text: `No bin entry found for "${prefix}".`,
+              },
+            ],
+          };
+
+        const dest = `${base}/flows/${prefix}.json`;
+        if (fs.existsSync(dest))
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Cannot restore: ${dest} already exists. Delete or rename it first.`,
+              },
+            ],
+          };
+
+        fs.renameSync(`${binDir}/${match}`, dest);
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Restored "${prefix}" from bin to ${dest}`,
+            },
+          ],
+        };
+      },
+    },
+    { optional: true },
+  );
 
   // ---- flow_run -----------------------------------------------------------------
 

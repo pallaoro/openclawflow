@@ -5,7 +5,7 @@ description: Design and run declarative agentic workflows using clawflow. Use wh
 
 # ClawFlow — Workflow Authoring Guide
 
-You have access to the `flow_run` tool. Use it to design and execute declarative workflows from natural language descriptions.
+You have access to the `flow_create` and `flow_run` tools. Use `flow_create` to scaffold and save a new flow file, then `flow_run` to execute it.
 
 ## When to use this
 
@@ -347,11 +347,11 @@ extract (agent) → parse (ai+schema) → loop:
 
 ## Saving flows for reuse
 
-When the user wants to save a flow for later use, write it to `flows/<flow-name>.json` in the workspace. File paths in `flow_run` resolve relative to `OPENCLAW_WORKSPACE`.
+Use `flow_create` to save a flow to disk. Plain names are saved to `workspace/flows/<name>.json` automatically.
 
 ```
-# Save
-Write the flow JSON to flows/linkedin-post.json
+# Create and save
+flow_create with file: "linkedin-post", flow: "linkedin-post", nodes: [...]
 
 # Run later
 flow_run with file: "flows/linkedin-post.json", input: { "topic": "..." }
@@ -361,6 +361,10 @@ flow_run with file: "flows/linkedin-post.json", input: { "topic": "..." }
 
 | Tool | Use |
 |------|-----|
+| `flow_create` | Create a new flow definition and save it to a JSON file |
+| `flow_delete` | Soft-delete a flow (moves to `.clawflow/bin/` with timestamp) |
+| `flow_restore` | List bin contents or restore a deleted flow |
+| `flow_edit` | Edit nodes in an existing flow (update, add, remove, move, list) |
 | `flow_resume` | Resume a paused flow after approval (`instanceId`, `approved: true/false`, `flow`) |
 | `flow_send_event` | Push an event into a waiting flow (`instanceId`, `eventType`, `payload`) |
 | `flow_status` | Check status of a flow instance or list all instances |
