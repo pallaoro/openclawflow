@@ -533,10 +533,6 @@ export class FlowRunner {
       }
     }
 
-    // Resolution order:
-    // 1. Injected inferenceFn (set by OpenClaw plugin — uses gateway providers)
-    // 2. Gateway OpenAI-compatible endpoint (auto-detected or configured)
-    // 3. Direct Anthropic API (requires ANTHROPIC_API_KEY)
     const text = await this.callInference(model, system, userText, node.temperature, node.maxTokens, contentParts);
 
     if (node.schema) {
@@ -647,8 +643,9 @@ export class FlowRunner {
     });
   }
 
+
   // ---- Inference dispatch -------------------------------------------------------
-  // Tries multiple backends in order: injected fn > gateway > direct Anthropic API
+  // Direct API call: OpenRouter > Anthropic > OpenAI
 
   private async callInference(
     model: string,
@@ -658,9 +655,7 @@ export class FlowRunner {
     maxTokens?: number,
     content?: ContentPart[],
   ): Promise<string> {
-    const tokens = maxTokens;
-
-    // 1. Injected inference function (from OpenClaw plugin)
+    // Optional override (used by tests and embedders)
     if (this.cfg.inferenceFn) {
       const result = await this.cfg.inferenceFn({
         model,
@@ -668,90 +663,11 @@ export class FlowRunner {
         prompt,
         content,
         temperature: temperature ?? 0,
-        maxTokens: tokens,
+        maxTokens,
       });
       return result.text;
     }
-
-    // 2. OpenClaw gateway (OpenAI-compatible endpoint)
-    const gatewayUrl =
-      this.cfg.gatewayUrl ??
-      process.env.OPENCLAW_GATEWAY_URL ??
-      this.detectGatewayUrl();
-
-    if (gatewayUrl) {
-      try {
-        return await this.callGateway(gatewayUrl, model, system, prompt, temperature, tokens, content);
-      } catch (err) {
-        // If gateway returns 404 (endpoint not enabled), fall through to direct API
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes("404") || msg.includes("Not Found")) {
-          // Gateway doesn't have chat completions enabled — try direct API
-        } else {
-          throw err;
-        }
-      }
-    }
-
-    // 3. Direct API (OpenRouter > Anthropic > OpenAI)
-    return this.callDirectApi(model, system, prompt, temperature, tokens, content);
-  }
-
-  private detectGatewayUrl(): string | undefined {
-    // Check common env vars that indicate a gateway is running
-    const port = process.env.OPENCLAW_GATEWAY_PORT ?? "18789";
-    const host = process.env.OPENCLAW_GATEWAY_HOST ?? "127.0.0.1";
-    // Only auto-detect if we're likely running inside an OpenClaw context
-    if (process.env.OPENCLAW_STATE_DIR || process.env.OPENCLAW_GATEWAY_PORT) {
-      return `http://${host}:${port}`;
-    }
-    return undefined;
-  }
-
-  private async callGateway(
-    gatewayUrl: string,
-    model: string,
-    system: string,
-    prompt: string,
-    temperature?: number,
-    maxTokens?: number,
-    content?: ContentPart[],
-  ): Promise<string> {
-    const token =
-      this.cfg.gatewayToken ??
-      process.env.OPENCLAW_GATEWAY_TOKEN ??
-      process.env.OPENCLAW_GATEWAY_PASSWORD;
-
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-
-    const resp = await fetch(`${gatewayUrl}/v1/chat/completions`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        model,
-        temperature: temperature ?? 0,
-        max_tokens: maxTokens,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: content ?? prompt },
-        ],
-      }),
-    });
-
-    if (!resp.ok) {
-      const body = await resp.text();
-      throw new Error(`Gateway AI call failed (${resp.status}): ${body}`);
-    }
-
-    const data = (await resp.json()) as {
-      choices: Array<{ message: { content: string } }>;
-    };
-    return data.choices?.[0]?.message?.content ?? "";
+    return this.callDirectApi(model, system, prompt, temperature, maxTokens, content);
   }
 
   private async callDirectApi(
@@ -801,7 +717,7 @@ export class FlowRunner {
         },
         body: JSON.stringify({
           model,
-          max_tokens: maxTokens,
+          max_tokens: maxTokens ?? 4096,
           temperature: temperature ?? 0,
           system,
           messages: [{ role: "user", content: userContent }],
@@ -830,13 +746,10 @@ export class FlowRunner {
     }
 
     throw new Error(
-      "No AI backend available. Either:\n" +
-        "  - Run inside OpenClaw (gateway auto-detected)\n" +
-        "  - Set gatewayUrl in plugin config\n" +
-        "  - Set OPENROUTER_API_KEY env var\n" +
-        "  - Set ANTHROPIC_API_KEY env var\n" +
-        "  - Set OPENAI_API_KEY env var\n" +
-        "  - Set apiKey in plugin config",
+      "No AI backend available. Set one of:\n" +
+        "  - OPENROUTER_API_KEY env var\n" +
+        "  - ANTHROPIC_API_KEY env var (or apiKey in plugin config)\n" +
+        "  - OPENAI_API_KEY env var",
     );
   }
 

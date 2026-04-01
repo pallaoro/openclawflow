@@ -317,14 +317,10 @@ export interface PluginConfig {
   memoryDir?: string;
   maxNodeDurationMs?: number;
   stateDir?: string; // where to persist flow state across restarts
-  /** Injected by the OpenClaw plugin to route AI calls through the gateway */
+  /** Override for AI inference — used by tests and embedders */
   inferenceFn?: InferenceFn;
   /** OpenClaw agent ID for do:agent nodes (e.g. "ops"). Falls back to --local if unset. */
   defaultAgent?: string;
-  /** Gateway URL for OpenAI-compatible endpoint (auto-detected when running in OpenClaw) */
-  gatewayUrl?: string;
-  /** Gateway auth token */
-  gatewayToken?: string;
   /** Webhook server config — starts an HTTP server for triggering flows externally */
   serve?: ServeConfig;
 }
