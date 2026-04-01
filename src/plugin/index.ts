@@ -156,11 +156,11 @@ All nodes require "name" and "do". Templates: {{ outputKey.field }}.`,
           abs = params.file;
         } else if (params.file.includes("/")) {
           // Relative path with directory — resolve from workspace root
-          abs = `${base}/${params.file}`;
+          abs = path.join(base, params.file);
         } else {
           // Plain name — put in workspace/flows/
           const name = params.file.replace(/\.json$/, "");
-          abs = `${base}/flows/${name}.json`;
+          abs = path.join(base, "flows", `${name}.json`);
         }
 
         if (fs.existsSync(abs))
@@ -246,10 +246,10 @@ Safe for agents to call without fear of data loss.`,
         if (params.file.startsWith("/")) {
           abs = params.file;
         } else if (params.file.includes("/")) {
-          abs = `${base}/${params.file}`;
+          abs = path.join(base, params.file);
         } else {
           const name = params.file.replace(/\.json$/, "");
-          abs = `${base}/flows/${name}.json`;
+          abs = path.join(base, "flows", `${name}.json`);
         }
 
         if (!fs.existsSync(abs))
@@ -257,12 +257,12 @@ Safe for agents to call without fear of data loss.`,
             content: [{ type: "text", text: `File not found: ${abs}` }],
           };
 
-        const binDir = `${base}/.clawflow/bin`;
+        const binDir = path.join(base, ".clawflow", "bin");
         fs.mkdirSync(binDir, { recursive: true });
 
         const basename = path.basename(abs, ".json");
         const ts = new Date().toISOString().replace(/[:.]/g, "-");
-        const binPath = `${binDir}/${basename}.${ts}.json`;
+        const binPath = path.join(binDir, `${basename}.${ts}.json`);
 
         fs.renameSync(abs, binPath);
 
@@ -309,7 +309,7 @@ directory. If the flow file already exists, the restore is rejected.`,
         const path = await import("path");
 
         const base = process.env.OPENCLAW_WORKSPACE ?? process.cwd();
-        const binDir = `${base}/.clawflow/bin`;
+        const binDir = path.join(base, ".clawflow", "bin");
 
         if (!fs.existsSync(binDir))
           return {
@@ -358,7 +358,7 @@ directory. If the flow file already exists, the restore is rejected.`,
             ],
           };
 
-        const dest = `${base}/flows/${prefix}.json`;
+        const dest = path.join(base, "flows", `${prefix}.json`);
         if (fs.existsSync(dest))
           return {
             content: [
@@ -369,7 +369,7 @@ directory. If the flow file already exists, the restore is rejected.`,
             ],
           };
 
-        fs.renameSync(`${binDir}/${match}`, dest);
+        fs.renameSync(path.join(binDir, match), dest);
 
         return {
           content: [
