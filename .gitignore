@@ -8,3 +8,6 @@ dist/
 
 # Internal docs, roadmap, competitive analysis (not for public repo)
 .internal/
+
+# Environment secrets
+.env

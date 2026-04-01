@@ -68,6 +68,8 @@ export interface AiNode extends BaseNode {
   model?: "fast" | "smart" | "best" | string;
   temperature?: number;
   maxTokens?: number;
+  /** File paths (images, PDFs) to include as multimodal content. Supports templates. */
+  attachments?: string[];
 }
 
 export interface AgentNode extends BaseNode {
@@ -278,10 +280,18 @@ export interface PendingApproval {
 // injects a function that calls the gateway's OpenAI-compatible endpoint,
 // reusing whatever providers/keys are already configured.
 
+/** A single content part in a multimodal message (OpenAI/OpenRouter-compatible format). */
+export type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } }
+  | { type: "file"; file: { filename: string; file_data: string } };
+
 export interface InferenceRequest {
   model: string;
   system: string;
   prompt: string;
+  /** When set, the prompt is multimodal — providers should use this instead of `prompt`. */
+  content?: ContentPart[];
   temperature?: number;
   maxTokens?: number;
 }
