@@ -1,6 +1,6 @@
 {
   "name": "@clawnify/clawflow",
-  "version": "0.6.0",
+  "version": "0.6.2",
   "description": "The n8n for agents. A declarative, AI-native workflow format that agents can read, write, and run.",
   "type": "module",
   "main": "./dist/index.js",
@@ -60,7 +60,6 @@
   "engines": {
     "node": ">=18"
   },
-  "dependencies": {},
   "peerDependencies": {
     "openclaw": "*"
   },
@@ -71,7 +70,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.5.0",
-    "tsx": "^4.19.0",
+    "tsx": "^4.21.0",
     "typescript": "^5.5.0"
   },
   "publishConfig": {
