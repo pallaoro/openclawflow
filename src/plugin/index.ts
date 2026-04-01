@@ -748,6 +748,7 @@ Each node maps to a Cloudflare Workflows primitive:
       description: `Edit nodes in a clawflow definition. Operates on a file or inline flow.
 
 Actions:
+  set     — set top-level flow fields (description, trigger, env, version)
   update  — update a node entirely or patch specific fields by node name
   add     — insert a new node at a position (default: end)
   remove  — remove a node by name
@@ -759,6 +760,7 @@ edit is rejected and errors are returned. For file-based flows, the file is
 overwritten with the updated definition on success.
 
 Examples:
+  Set flow fields:    { action: "set", fields: { description: "New desc", trigger: { on: "webhook" } } }
   Update one field:   { action: "update", node: "classify", fields: { prompt: "New prompt" } }
   Replace full node:  { action: "update", node: "classify", replace: { name: "classify", do: "ai", prompt: "..." } }
   Add at position:    { action: "add", position: 2, nodeDefinition: { name: "step3", do: "code", run: "..." } }
@@ -789,7 +791,7 @@ Examples:
           },
           action: {
             type: "string",
-            enum: ["update", "add", "remove", "move", "list"],
+            enum: ["set", "update", "add", "remove", "move", "list"],
           },
           node: {
             type: "string",
@@ -798,7 +800,7 @@ Examples:
           fields: {
             type: "object",
             additionalProperties: true,
-            description: "For action=update: partial field updates to merge into the node",
+            description: "For action=set: top-level flow fields to set (description, trigger, env, version). For action=update: partial field updates to merge into the node.",
           },
           replace: {
             type: "object",
@@ -822,7 +824,7 @@ Examples:
         params: {
           file?: string;
           flow?: FlowDefinition;
-          action: "update" | "add" | "remove" | "move" | "list";
+          action: "set" | "update" | "add" | "remove" | "move" | "list";
           node?: string;
           fields?: Record<string, unknown>;
           replace?: FlowNode;
@@ -869,6 +871,45 @@ Examples:
 
         const findIndex = (name: string) =>
           flowDef.nodes.findIndex((n) => n.name === name);
+
+        // ---- Set (top-level flow fields) ---
+        if (params.action === "set") {
+          if (!params.fields)
+            return fail('action "set" requires "fields".');
+
+          const allowed = ["description", "trigger", "env", "version"];
+          const backup = { ...flowDef };
+
+          for (const [key, value] of Object.entries(params.fields)) {
+            if (!allowed.includes(key))
+              return fail(
+                `Cannot set "${key}". Allowed fields: ${allowed.join(", ")}. Use "update" to modify nodes.`,
+              );
+            if (value === null || value === undefined) {
+              delete (flowDef as Record<string, unknown>)[key];
+            } else {
+              (flowDef as Record<string, unknown>)[key] = value;
+            }
+          }
+
+          const validation = validateFlow(flowDef);
+          if (!validation.ok) {
+            // rollback
+            Object.assign(flowDef, backup);
+            return fail(
+              `Validation failed after set:\n${validation.errors.map((e) => `  - ${e.message}`).join("\n")}`,
+            );
+          }
+
+          if (filePath) {
+            const { writeFileSync } = await import("fs");
+            writeFileSync(filePath, JSON.stringify(flowDef, null, 2) + "\n");
+          }
+          return ok(
+            `Flow fields updated: ${Object.keys(params.fields).join(", ")}.${filePath ? ` File written: ${filePath}` : ""}`,
+            flowDef,
+          );
+        }
 
         // ---- List ---
         if (params.action === "list") {

@@ -364,7 +364,7 @@ flow_run with file: "flows/linkedin-post.json", input: { "topic": "..." }
 | `flow_create` | Create a new flow definition and save it to a JSON file |
 | `flow_delete` | Soft-delete a flow (moves to `.clawflow/bin/` with timestamp) |
 | `flow_restore` | List bin contents or restore a deleted flow |
-| `flow_edit` | Edit nodes in an existing flow (update, add, remove, move, list) |
+| `flow_edit` | Edit a flow: set top-level fields (description, trigger, env, version) or modify nodes (update, add, remove, move, list) |
 | `flow_resume` | Resume a paused flow after approval (`instanceId`, `approved: true/false`, `flow`) |
 | `flow_send_event` | Push an event into a waiting flow (`instanceId`, `eventType`, `payload`) |
 | `flow_status` | Check status of a flow instance or list all instances |
