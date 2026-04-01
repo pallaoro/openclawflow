@@ -22,7 +22,7 @@ A flow is JSON with a `flow` name, an optional `env` block, and a `nodes` array.
 
 | Node | Purpose | Key fields |
 |------|---------|------------|
-| `ai` | Single LLM call, structured or freeform | `prompt`, `schema`, `model`, `input` |
+| `ai` | Single LLM call, structured or freeform | `prompt`, `schema`, `model`, `input`, `attachments` |
 | `agent` | Delegate to a real OpenClaw agent (with tools, browser, etc.) | `task`, `agent`, `tools`, `model` |
 | `exec` | Run a shell command deterministically (no AI) | `command`, `cwd` |
 | `branch` | Multi-way routing with inline sub-flows per path | `on`, `paths`, `default` |
@@ -121,6 +121,29 @@ Supported operators: `==`, `!=`, `>`, `<`, `>=`, `<=`. Bare paths evaluate as tr
 ```
 
 **Common mistake:** If a node has `"name": "get_data", "output": "api"`, reference it as `{{ api }}` — NOT `{{ get_data }}`. The node name is just an identifier; the output key is what goes into state.
+
+### do: ai — attachments (images & PDFs)
+
+AI nodes support an `attachments` field — an array of file paths or URLs sent as multimodal content alongside the prompt. Templates are supported.
+
+```json
+{
+  "name": "analyze-receipt",
+  "do": "ai",
+  "prompt": "Extract the total and vendor name from this receipt",
+  "attachments": ["{{ trigger.receiptPath }}"],
+  "schema": { "total": "number", "vendor": "string" },
+  "model": "smart",
+  "output": "extracted"
+}
+```
+
+- **Images**: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` — sent as `image_url` content blocks
+- **PDFs**: `.pdf` — sent as `file` content blocks
+- **URLs**: passed through directly (no file read): `"attachments": ["https://example.com/photo.jpg"]`
+- **Local files**: base64-encoded automatically
+- Combine with `schema` for structured extraction from images/documents
+- Works with all providers: OpenRouter, OpenAI, Anthropic, gateway
 
 ### do: exec — deterministic shell execution
 
@@ -340,6 +363,44 @@ extract (agent) → parse (ai+schema) → loop:
       "name": "notify",
       "do": "agent",
       "task": "Send email to {{ trigger.email }} with these attachments:\n{{ process_items[*].outPath }}"
+    }
+  ]
+}
+```
+
+## Example: Image/PDF analysis with structured output
+
+```json
+{
+  "flow": "invoice-processor",
+  "nodes": [
+    {
+      "name": "extract",
+      "do": "ai",
+      "prompt": "Extract all line items, totals, and vendor info from this invoice",
+      "attachments": ["{{ trigger.invoicePath }}"],
+      "schema": {
+        "vendor": "string",
+        "date": "string",
+        "items": [{ "description": "string", "amount": "number" }],
+        "total": "number"
+      },
+      "model": "smart",
+      "output": "invoice"
+    },
+    {
+      "name": "review",
+      "do": "wait",
+      "for": "approval",
+      "prompt": "Verify extracted invoice from {{ invoice.vendor }}: ${{ invoice.total }}"
+    },
+    {
+      "name": "save",
+      "do": "http",
+      "url": "https://api.example.com/invoices",
+      "method": "POST",
+      "body": "{{ invoice | json }}",
+      "output": "saved"
     }
   ]
 }
