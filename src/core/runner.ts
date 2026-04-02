@@ -1351,8 +1351,13 @@ export class FlowRunner {
         ? this.deepFreeze(JSON.parse(JSON.stringify(input)))
         : undefined;
 
+    // Wrap input in a diagnostic Proxy that reports available keys on undefined access
+    const diagnosticInput = frozenInput !== undefined && frozenInput !== null && typeof frozenInput === "object"
+      ? this.wrapWithDiagnosticProxy(frozenInput as Record<string, unknown>, node.name, state)
+      : frozenInput;
+
     try {
-      return { output: fn(frozenInput, frozenState) };
+      return { output: fn(diagnosticInput, frozenState) };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       let hint = "";
@@ -1361,11 +1366,76 @@ export class FlowRunner {
       } else if (/read only|Cannot assign|Cannot add/i.test(msg)) {
         hint =
           " Hint: state and input are frozen — return new values instead of mutating.";
+      } else if (/Cannot read propert|undefined is not an object/i.test(msg)) {
+        hint = this.buildStateHint(input, state);
       }
       throw new Error(
         `code "${node.name}": runtime error — ${msg}.${hint}`,
       );
     }
+  }
+
+  /**
+   * Wrap an object-style input with a Proxy that throws a descriptive error
+   * when the code accesses a property that doesn't exist, showing what keys
+   * ARE available in input and in state.trigger.
+   */
+  private wrapWithDiagnosticProxy(
+    obj: Record<string, unknown>,
+    nodeName: string,
+    state: FlowState,
+  ): Record<string, unknown> {
+    const inputKeys = Object.keys(obj);
+    const triggerKeys =
+      state.trigger && typeof state.trigger === "object"
+        ? Object.keys(state.trigger as Record<string, unknown>)
+        : [];
+    const stateKeys = Object.keys(state);
+
+    return new Proxy(obj, {
+      get(target, prop, receiver) {
+        if (typeof prop === "symbol" || prop in target) {
+          return Reflect.get(target, prop, receiver);
+        }
+        const p = String(prop);
+        // Skip internal JS access patterns
+        if (p === "toJSON" || p === "valueOf" || p === "toString" || p === "constructor") {
+          return Reflect.get(target, prop, receiver);
+        }
+        const parts: string[] = [];
+        parts.push(`'${p}' is not a key in input. Input keys: [${inputKeys.join(", ")}].`);
+        if (triggerKeys.includes(p)) {
+          parts.push(`Did you mean state.trigger.${p}? It exists in trigger.`);
+        } else if (triggerKeys.length > 0) {
+          parts.push(`Trigger keys: [${triggerKeys.join(", ")}].`);
+        }
+        if (stateKeys.length > 0) {
+          parts.push(`State keys: [${stateKeys.join(", ")}].`);
+        }
+        throw new Error(parts.join(" "));
+      },
+    });
+  }
+
+  /**
+   * Build a hint string showing available keys when a "Cannot read property" error occurs.
+   */
+  private buildStateHint(input: unknown, state: FlowState): string {
+    const parts: string[] = [" Hint:"];
+    if (input !== undefined && input !== null && typeof input === "object") {
+      parts.push(`Input keys: [${Object.keys(input as Record<string, unknown>).join(", ")}].`);
+    } else {
+      parts.push("input is " + (input === undefined ? "undefined" : String(input)) + ".");
+    }
+    const triggerKeys =
+      state.trigger && typeof state.trigger === "object"
+        ? Object.keys(state.trigger as Record<string, unknown>)
+        : [];
+    if (triggerKeys.length > 0) {
+      parts.push(`Trigger keys: [${triggerKeys.join(", ")}].`);
+    }
+    parts.push(`State keys: [${Object.keys(state).join(", ")}].`);
+    return parts.join(" ");
   }
 
   /**

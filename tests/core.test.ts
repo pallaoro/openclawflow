@@ -158,6 +158,82 @@ describe("FlowRunner — code node", () => {
   });
 });
 
+// ---- FlowRunner: code node diagnostics ------------------------------------------
+
+describe("FlowRunner — code node diagnostics", () => {
+  after(cleanup);
+
+  it("shows available keys when accessing missing property on input", async () => {
+    const flow: FlowDefinition = {
+      flow: "test-diag-missing-key",
+      nodes: [
+        {
+          name: "bad_access",
+          do: "code" as const,
+          run: "input.email_to",
+          input: "trigger.payload",
+          output: "result",
+        },
+      ],
+    };
+    const runner = new FlowRunner(cfg);
+    const result = await runner.run(flow, {
+      payload: { client: "Acme", order: 123 },
+      email_to: "user@example.com",
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.error!, /email_to/);
+    assert.match(result.error!, /Input keys:/);
+    assert.match(result.error!, /client/);
+    assert.match(result.error!, /state\.trigger\.email_to/);
+  });
+
+  it("catches chained access on missing property via Proxy", async () => {
+    const flow: FlowDefinition = {
+      flow: "test-diag-undefined-chain",
+      nodes: [
+        {
+          name: "bad_chain",
+          do: "code" as const,
+          run: "input.nested.deep",
+          input: "trigger.payload",
+          output: "result",
+        },
+      ],
+    };
+    const runner = new FlowRunner(cfg);
+    const result = await runner.run(flow, {
+      payload: { client: "Acme" },
+      email_to: "user@example.com",
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.error!, /runtime error/);
+    assert.match(result.error!, /'nested' is not a key in input/);
+    assert.match(result.error!, /Input keys:/);
+  });
+
+  it("does not throw for valid property access", async () => {
+    const flow: FlowDefinition = {
+      flow: "test-diag-valid",
+      nodes: [
+        {
+          name: "good_access",
+          do: "code" as const,
+          run: "input.client",
+          input: "trigger.payload",
+          output: "result",
+        },
+      ],
+    };
+    const runner = new FlowRunner(cfg);
+    const result = await runner.run(flow, {
+      payload: { client: "Acme" },
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.state.result, "Acme");
+  });
+});
+
 // ---- FlowRunner: exec node ------------------------------------------------------
 
 describe("FlowRunner — exec node", () => {

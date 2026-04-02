@@ -367,6 +367,15 @@ directory. If the flow file already exists, the restore is rejected.`,
       name: "flow_run",
       description: `Run an agentic workflow in the clawflow format.
 
+State model:
+  The "input" parameter becomes "trigger" in flow state.
+  Flow state = { trigger, env?, ...nodeOutputs }.
+  Each node with "output" adds its result to state (e.g. output: "result" → state.result).
+  In code nodes: fn(input, state) — "input" is the resolved node.input field, "state" is the full flow state.
+  IMPORTANT: trigger contains ALL initial data. If you need different parts of trigger in a code node,
+  use object-style input: { "payload": "trigger.payload", "email": "trigger.email_to" }
+  or access via state.trigger.field inside the code.
+
 Node types:
   ai       — LLM call, structured or freeform. Use schema: for typed output.
   agent    — open-ended autonomous task (falls back to high-capability AI)
