@@ -1,21 +1,22 @@
 import { FlowRunner, sendEvent } from "../core/runner.js";
-import { transpileToCloudflare } from "../core/transpile.js";
+
 import { startWebhookServer } from "../core/serve.js";
 import { validateFlow } from "../core/validate.js";
 import type { FlowDefinition, FlowNode, PluginConfig, BranchNode, ConditionNode, LoopNode, ParallelNode } from "../core/types.js";
 
 // ---- OpenClaw Plugin: clawflow ---------------------------------------------------
-// Registers ten tools:
+// Registers eleven tools:
 //
 //   flow_create        — create a new flow definition and save to file
 //   flow_delete        — soft-delete a flow (moves to .bin/)
-//   flow_revert_from_bin       — restore a flow from the bin or list bin contents
+//   flow_restore_from_bin       — restore a flow from the bin or list bin contents
 //   flow_run           — execute a flow (inline or from file)
 //   flow_resume        — resume after approval gate
 //   flow_send_event    — push an event into a waiting flow
 //   flow_status        — inspect a running/completed flow instance
 //   flow_list          — list all saved flow definitions in the workspace
-//   flow_transpile     — convert a .flow definition to Cloudflare Workers TS
+//   flow_read          — read a flow definition and show expected inputs
+//   flow_publish       — publish a draft flow as a numbered version
 //   flow_edit          — edit nodes in a flow definition (file or inline)
 
 interface PluginApi {
@@ -53,6 +54,55 @@ function register(api: PluginApi) {
       serve: pluginCfg.serve,
       logger: api.logger,
     });
+  }
+
+  // ---- Shared helpers ------------------------------------------------------------
+
+  /** Resolve a file param to an absolute path using workspace conventions. */
+  function resolveFlowFile(file: string): string {
+    const path = require("path") as typeof import("path");
+    const base = process.env.OPENCLAW_WORKSPACE ?? process.cwd();
+    if (file.startsWith("/")) return file;
+    if (file.includes("/")) return path.join(base, file);
+    const name = file.replace(/\.json$/, "");
+    return path.join(base, "flows", `${name}.json`);
+  }
+
+  /** Get the versions directory for a flow name. */
+  function versionsDir(flowName: string): string {
+    const path = require("path") as typeof import("path");
+    const base = process.env.OPENCLAW_WORKSPACE ?? process.cwd();
+    return path.join(base, ".clawflow", "versions", flowName);
+  }
+
+  /** List all published version numbers for a flow, sorted ascending. */
+  function listVersions(flowName: string): number[] {
+    const fs = require("fs") as typeof import("fs");
+    const dir = versionsDir(flowName);
+    if (!fs.existsSync(dir)) return [];
+    return fs.readdirSync(dir)
+      .filter((f: string) => /^\d+\.json$/.test(f))
+      .map((f: string) => parseInt(f, 10))
+      .sort((a: number, b: number) => a - b);
+  }
+
+  /** Read a specific published version. Returns null if not found. */
+  function readVersion(flowName: string, version: number): FlowDefinition | null {
+    const fs = require("fs") as typeof import("fs");
+    const path = require("path") as typeof import("path");
+    const file = path.join(versionsDir(flowName), `${version}.json`);
+    if (!fs.existsSync(file)) return null;
+    return JSON.parse(fs.readFileSync(file, "utf-8")) as FlowDefinition;
+  }
+
+  /** Get the latest published version definition. Returns null if none published. */
+  function readLatestVersion(flowName: string): { version: number; def: FlowDefinition } | null {
+    const versions = listVersions(flowName);
+    if (versions.length === 0) return null;
+    const latest = versions[versions.length - 1];
+    const def = readVersion(flowName, latest);
+    if (!def) return null;
+    return { version: latest, def };
   }
 
   // ---- flow_create --------------------------------------------------------------
@@ -195,7 +245,7 @@ All nodes require "name" and "do". Templates: {{ outputKey.field }}.`,
       description: `Delete a flow file by moving it to the bin.
 
 The flow is not permanently removed — it is timestamped and moved to
-workspace/.clawflow/bin/ so it can be restored later with flow_revert_from_bin.
+workspace/.clawflow/bin/ so it can be restored later with flow_restore_from_bin.
 Safe for agents to call without fear of data loss.`,
 
       parameters: {
@@ -256,11 +306,11 @@ Safe for agents to call without fear of data loss.`,
     { optional: true },
   );
 
-  // ---- flow_revert_from_bin -------------------------------------------------------------
+  // ---- flow_restore_from_bin -------------------------------------------------------------
 
   api.registerTool(
     {
-      name: "flow_revert_from_bin",
+      name: "flow_restore_from_bin",
       description: `Restore a flow from the bin or list bin contents.
 
 Without "name", lists all flows in workspace/.clawflow/bin/ with their timestamps.
@@ -391,7 +441,11 @@ Node types:
 
 All nodes support retry: { limit, delay, backoff } and timeout.
 Templates: use {{ nodeName.field }} to reference any value in flow state.
-Returns instanceId for status tracking and resume.`,
+Returns instanceId for status tracking and resume.
+
+Versioning: when a flow has published versions, flow_run uses the latest
+published version by default. Set draft: true to run the working copy instead.
+Set version to run a specific published version.`,
 
       parameters: {
         type: "object",
@@ -411,45 +465,88 @@ Returns instanceId for status tracking and resume.`,
           },
           file: {
             type: "string",
-            description: "Path to a .json flow file",
+            description: "Path to a .json flow file (or plain name like \"my-flow\")",
           },
           input: {
             type: "object",
             additionalProperties: true,
             description: "Input data, available as trigger.* in the flow",
           },
+          draft: {
+            type: "boolean",
+            description:
+              "Run the draft (working copy) instead of the latest published version. Default: false.",
+          },
+          version: {
+            type: "number",
+            description:
+              "Run a specific published version number. Overrides draft flag.",
+          },
         },
       },
 
       async execute(
         _id: string,
-        params: { flow?: FlowDefinition; file?: string; input?: unknown },
+        params: {
+          flow?: FlowDefinition;
+          file?: string;
+          input?: unknown;
+          draft?: boolean;
+          version?: number;
+        },
       ) {
         let flowDef: FlowDefinition;
+        let source = "";
 
         if (params.file) {
           const { readFileSync, existsSync } = await import("fs");
           const pathMod = await import("path");
-          const base =
-            process.env.OPENCLAW_WORKSPACE ?? process.cwd();
-          let abs: string;
-          if (params.file.startsWith("/")) {
-            abs = params.file;
-          } else if (params.file.includes("/")) {
-            abs = pathMod.join(base, params.file);
+          const abs = resolveFlowFile(params.file);
+
+          // Determine flow name for version lookup
+          const flowName = pathMod.basename(abs, ".json");
+
+          if (params.version != null) {
+            // Specific version requested
+            const vDef = readVersion(flowName, params.version);
+            if (!vDef)
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: `Version ${params.version} not found for flow "${flowName}". Available: ${listVersions(flowName).join(", ") || "none (not yet published)"}`,
+                  },
+                ],
+              };
+            flowDef = vDef;
+            source = `v${params.version}`;
+          } else if (!params.draft) {
+            // Default: use latest published version if available
+            const latest = readLatestVersion(flowName);
+            if (latest) {
+              flowDef = latest.def;
+              source = `v${latest.version}`;
+            } else {
+              // No published versions — fall back to draft
+              if (!existsSync(abs))
+                return {
+                  content: [{ type: "text", text: `File not found: ${abs}` }],
+                };
+              flowDef = JSON.parse(readFileSync(abs, "utf8")) as FlowDefinition;
+              source = "draft (no published versions)";
+            }
           } else {
-            const name = params.file.replace(/\.json$/, "");
-            abs = pathMod.join(base, "flows", `${name}.json`);
+            // Explicit draft mode
+            if (!existsSync(abs))
+              return {
+                content: [{ type: "text", text: `File not found: ${abs}` }],
+              };
+            flowDef = JSON.parse(readFileSync(abs, "utf8")) as FlowDefinition;
+            source = "draft";
           }
-          if (!existsSync(abs))
-            return {
-              content: [{ type: "text", text: `File not found: ${abs}` }],
-            };
-          flowDef = JSON.parse(
-            readFileSync(abs, "utf8"),
-          ) as FlowDefinition;
         } else if (params.flow) {
           flowDef = params.flow as FlowDefinition;
+          source = "inline";
         } else {
           return {
             content: [
@@ -463,11 +560,12 @@ Returns instanceId for status tracking and resume.`,
 
         try {
           const result = await runner.run(flowDef, params.input ?? {});
+          const out = { ...result, _source: source };
           return {
             content: [
-              { type: "text", text: JSON.stringify(result, null, 2) },
+              { type: "text", text: JSON.stringify(out, null, 2) },
             ],
-            details: result,
+            details: out,
           };
         } catch (err) {
           return {
@@ -747,8 +845,10 @@ Use this to discover available flows before running or editing them.`,
           file: string;
           flow: string;
           description?: string;
-          version?: string;
           trigger?: unknown;
+          expectedInputs?: string[];
+          publishedVersion?: number;
+          totalVersions?: number;
           nodes: number;
         }> = [];
 
@@ -758,12 +858,19 @@ Use this to discover available flows before running or editing them.`,
             const raw = fs.readFileSync(abs, "utf-8");
             const def = JSON.parse(raw) as FlowDefinition;
             if (!def.flow || !Array.isArray(def.nodes)) continue;
+            const inputs = extractTriggerInputs(def.nodes);
+            const flowName = file.replace(/\.json$/, "");
+            const versions = listVersions(flowName);
             flows.push({
               file: abs,
               flow: def.flow,
               ...(def.description && { description: def.description }),
-              ...(def.version && { version: def.version }),
               ...(def.trigger && { trigger: def.trigger }),
+              ...(inputs.length > 0 && { expectedInputs: inputs }),
+              ...(versions.length > 0 && {
+                publishedVersion: versions[versions.length - 1],
+                totalVersions: versions.length,
+              }),
               nodes: def.nodes.length,
             });
           } catch {
@@ -793,55 +900,284 @@ Use this to discover available flows before running or editing them.`,
     { optional: true },
   );
 
-  // ---- flow_transpile -----------------------------------------------------------
+  // ---- flow_read ----------------------------------------------------------------
+
+  /**
+   * Recursively extract unique trigger.* paths from any string values in an
+   * object tree. This tells agents what input fields a flow expects.
+   */
+  function extractTriggerInputs(obj: unknown): string[] {
+    const paths = new Set<string>();
+    const re = /\{\{\s*trigger\.(\w+(?:\.\w+)*)/g;
+
+    function walk(val: unknown): void {
+      if (typeof val === "string") {
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(val)) !== null) paths.add(m[1]);
+      } else if (Array.isArray(val)) {
+        for (const item of val) walk(item);
+      } else if (val && typeof val === "object") {
+        for (const v of Object.values(val)) walk(v);
+      }
+    }
+    walk(obj);
+    return [...paths].sort();
+  }
+
+  /** Find a node by name, searching nested structures (branch paths, loop, parallel, condition). */
+  function findNode(nodes: FlowNode[], name: string): FlowNode | undefined {
+    for (const n of nodes) {
+      if (n.name === name) return n;
+      if ("paths" in n && n.paths) {
+        for (const branch of Object.values(
+          n.paths as Record<string, FlowNode[]>,
+        )) {
+          const found = findNode(branch, name);
+          if (found) return found;
+        }
+      }
+      if ("default" in n && Array.isArray(n.default)) {
+        const found = findNode(n.default as FlowNode[], name);
+        if (found) return found;
+      }
+      if ("nodes" in n && Array.isArray(n.nodes)) {
+        const found = findNode(n.nodes as FlowNode[], name);
+        if (found) return found;
+      }
+      if ("then" in n && Array.isArray(n.then)) {
+        const found = findNode(n.then as FlowNode[], name);
+        if (found) return found;
+      }
+      if ("else" in n && Array.isArray((n as ConditionNode).else)) {
+        const found = findNode((n as ConditionNode).else!, name);
+        if (found) return found;
+      }
+    }
+    return undefined;
+  }
 
   api.registerTool(
     {
-      name: "flow_transpile",
-      description: `Convert a clawflow definition into a Cloudflare Workers TypeScript class.
-Output is a complete .ts file you can deploy with: wrangler deploy
-Each node maps to a Cloudflare Workflows primitive:
-  ai/agent   → step.do()
-  wait/event → step.waitForEvent()
-  sleep      → step.sleep()
-  parallel   → Promise.all() / Promise.race()`,
+      name: "flow_read",
+      description: `Read a flow definition from file and return its contents.
+
+Returns the full flow definition (or a single node if specified) along with
+the list of expected trigger inputs extracted from templates. Use this to
+inspect a flow before running it or to understand what inputs it needs.
+
+Versioning: by default reads the draft (working copy). Set version to read
+a specific published version. The response includes available version numbers.`,
 
       parameters: {
         type: "object",
-        required: ["flow"],
+        required: ["file"],
         properties: {
-          flow: {
-            type: "object",
-            required: ["flow", "nodes"],
-            properties: {
-              flow: { type: "string" },
-              nodes: {
-                type: "array",
-                items: { type: "object", additionalProperties: true },
-              },
-            },
-            additionalProperties: true,
+          file: {
+            type: "string",
+            description:
+              "Filename or path to the flow file. Plain names resolve to workspace/flows/<name>.json.",
+          },
+          node: {
+            type: "string",
+            description:
+              "Name of a specific node to return. Searches nested structures (branches, loops, etc.).",
+          },
+          version: {
+            type: "number",
+            description:
+              "Read a specific published version instead of the draft.",
           },
         },
       },
 
       async execute(
         _id: string,
-        params: { flow: FlowDefinition },
+        params: { file: string; node?: string; version?: number },
       ) {
+        const fs = await import("fs");
+        const pathMod = await import("path");
+
+        const abs = resolveFlowFile(params.file);
+        const flowName = pathMod.basename(abs, ".json");
+        const versions = listVersions(flowName);
+
+        let flowDef: FlowDefinition;
+        let source: string;
+
+        if (params.version != null) {
+          const vDef = readVersion(flowName, params.version);
+          if (!vDef) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Version ${params.version} not found for "${flowName}". Available: ${versions.join(", ") || "none"}`,
+                },
+              ],
+            };
+          }
+          flowDef = vDef;
+          source = `v${params.version}`;
+        } else {
+          if (!fs.existsSync(abs)) {
+            return {
+              content: [{ type: "text", text: `File not found: ${abs}` }],
+            };
+          }
+          try {
+            flowDef = JSON.parse(fs.readFileSync(abs, "utf-8")) as FlowDefinition;
+          } catch (err) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Failed to parse ${abs}: ${err instanceof Error ? err.message : String(err)}`,
+                },
+              ],
+            };
+          }
+          source = "draft";
+        }
+
+        const inputs = extractTriggerInputs(flowDef.nodes);
+
+        // Single node mode
+        if (params.node) {
+          const found = findNode(flowDef.nodes, params.node);
+          if (!found) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Node "${params.node}" not found in flow "${flowDef.flow}". Nodes: ${flowDef.nodes.map((n) => n.name).join(", ")}`,
+                },
+              ],
+            };
+          }
+          const nodeInputs = extractTriggerInputs(found);
+          const result = {
+            flow: flowDef.flow,
+            _source: source,
+            _file: abs,
+            ...(versions.length > 0 && { _versions: versions }),
+            ...(nodeInputs.length > 0 && { expectedInputs: nodeInputs }),
+            node: found,
+          };
+          return {
+            content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+            details: result,
+          };
+        }
+
+        // Full flow mode
+        const result = {
+          ...flowDef,
+          _source: source,
+          _file: abs,
+          ...(versions.length > 0 && { _versions: versions }),
+          ...(inputs.length > 0 && { _expectedInputs: inputs }),
+        };
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          details: result,
+        };
+      },
+    },
+    { optional: true },
+  );
+
+  // ---- flow_publish --------------------------------------------------------------
+
+  api.registerTool(
+    {
+      name: "flow_publish",
+      description: `Publish the current draft of a flow as a new numbered version.
+
+Validates the draft, assigns the next version number (auto-incrementing integer),
+and saves an immutable copy to .clawflow/versions/<flowName>/<N>.json.
+After publishing, flow_run will use this version by default.
+
+Use this when a flow is ready for production. Edits via flow_edit continue to
+modify the draft without affecting published versions.`,
+
+      parameters: {
+        type: "object",
+        required: ["file"],
+        properties: {
+          file: {
+            type: "string",
+            description:
+              "Filename or path to the draft flow file. Plain names resolve to workspace/flows/<name>.json.",
+          },
+        },
+      },
+
+      async execute(
+        _id: string,
+        params: { file: string },
+      ) {
+        const fs = await import("fs");
+        const pathMod = await import("path");
+
+        const abs = resolveFlowFile(params.file);
+        if (!fs.existsSync(abs)) {
+          return {
+            content: [{ type: "text", text: `Draft not found: ${abs}` }],
+          };
+        }
+
+        let flowDef: FlowDefinition;
         try {
-          const ts = transpileToCloudflare(params.flow);
-          return { content: [{ type: "text", text: ts }] };
+          flowDef = JSON.parse(fs.readFileSync(abs, "utf-8")) as FlowDefinition;
         } catch (err) {
           return {
             content: [
               {
                 type: "text",
-                text: `Transpile error: ${err instanceof Error ? err.message : String(err)}`,
+                text: `Failed to parse ${abs}: ${err instanceof Error ? err.message : String(err)}`,
               },
             ],
           };
         }
+
+        const validation = validateFlow(flowDef);
+        if (!validation.ok) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Validation failed — cannot publish:\n${validation.errors.map((e) => `  - ${e.message}`).join("\n")}`,
+              },
+            ],
+          };
+        }
+
+        const flowName = pathMod.basename(abs, ".json");
+        const versions = listVersions(flowName);
+        const nextVersion = versions.length > 0 ? versions[versions.length - 1] + 1 : 1;
+
+        // Stamp the version number into the definition
+        flowDef.version = String(nextVersion);
+
+        const dir = versionsDir(flowName);
+        fs.mkdirSync(dir, { recursive: true });
+        const versionFile = pathMod.join(dir, `${nextVersion}.json`);
+        fs.writeFileSync(versionFile, JSON.stringify(flowDef, null, 2) + "\n");
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Published "${flowDef.flow}" as v${nextVersion}. flow_run will now use this version by default.\nFile: ${versionFile}`,
+            },
+          ],
+          details: {
+            flow: flowDef.flow,
+            version: nextVersion,
+            file: versionFile,
+            totalVersions: nextVersion,
+          },
+        };
       },
     },
     { optional: true },

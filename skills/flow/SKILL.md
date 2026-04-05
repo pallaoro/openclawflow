@@ -5,7 +5,14 @@ description: Design and run declarative agentic workflows using clawflow. Use wh
 
 # ClawFlow — Workflow Authoring Guide
 
-You have access to the `flow_create` and `flow_run` tools. Use `flow_create` to scaffold and save a new flow file, then `flow_run` to execute it.
+You have access to flow tools for the full lifecycle: create, edit, read, list, publish, and run.
+
+- Use `flow_create` to scaffold a new flow file (draft)
+- Use `flow_edit` to modify it
+- Use `flow_read` to inspect it (shows expected inputs and available versions)
+- Use `flow_list` to discover all flows in the workspace
+- Use `flow_publish` to promote a draft to a numbered version
+- Use `flow_run` to execute it (runs the latest published version by default)
 
 ## When to use this
 
@@ -23,7 +30,7 @@ A flow is JSON with a `flow` name, an optional `env` block, and a `nodes` array.
 | Node | Purpose | Key fields |
 |------|---------|------------|
 | `ai` | Single LLM call, structured or freeform | `prompt`, `schema`, `model`, `input`, `attachments` |
-| `agent` | Delegate to a real OpenClaw agent (with tools, browser, etc.) | `task`, `agent`, `tools`, `model` |
+| `agent` | Delegate to a real OpenClaw agent (with tools, browser, etc.) | `task`, `agent`, `tools` |
 | `exec` | Run a shell command deterministically (no AI) | `command`, `cwd` |
 | `branch` | Multi-way routing with inline sub-flows per path | `on`, `paths`, `default` |
 | `condition` | If/else with sub-node blocks that reconverge | `if`, `then`, `else` |
@@ -422,8 +429,47 @@ Use `flow_create` to save a flow to disk. Plain names are saved to `workspace/fl
 flow_create with file: "linkedin-post", flow: "linkedin-post", nodes: [...]
 
 # Run later
-flow_run with file: "flows/linkedin-post.json", input: { "topic": "..." }
+flow_run with file: "linkedin-post", input: { "topic": "..." }
 ```
+
+## Versioning
+
+Flows support draft/publish versioning. The file in `flows/` is the **draft** (working copy). Published versions are immutable snapshots stored in `.clawflow/versions/<flowName>/`.
+
+```
+flows/
+  my-flow.json                  ← draft (flow_edit modifies this)
+.clawflow/
+  history/my-flow/              ← undo stack (auto-snapshot on every edit)
+  versions/my-flow/             ← published versions (immutable)
+    1.json
+    2.json
+```
+
+**Workflow:**
+
+1. `flow_create` or `flow_edit` — work on the draft
+2. `flow_read file: "my-flow"` — inspect the draft, see expected inputs and available versions
+3. `flow_run file: "my-flow" draft: true` — test the draft
+4. `flow_publish file: "my-flow"` — promote draft to next version (validates first)
+5. `flow_run file: "my-flow"` — runs latest published version
+
+**Rules:**
+- `flow_run` uses the latest published version by default. Falls back to draft if no versions exist.
+- `flow_run file: "my-flow" draft: true` — explicitly run the working copy
+- `flow_run file: "my-flow" version: 2` — run a specific version
+- `flow_read file: "my-flow" version: 1` — inspect a specific published version
+- Version numbers are auto-incrementing integers (1, 2, 3...) — no semver
+- Edits to the draft never affect published versions
+- **Do NOT create separate files for versions** (e.g. `my-flow-v2.json`). Use `flow_publish` instead.
+
+## Reading and discovering flows
+
+- `flow_list` — lists all flows with their description, expected inputs, trigger config, and published version info
+- `flow_read file: "my-flow"` — full definition with expected trigger inputs (extracted from `{{ trigger.* }}` templates) and available versions
+- `flow_read file: "my-flow" node: "classify"` — inspect a single node (searches nested structures)
+
+**Always use `flow_read` before running an unfamiliar flow** to understand what inputs it expects.
 
 ## Other tools
 
@@ -431,9 +477,11 @@ flow_run with file: "flows/linkedin-post.json", input: { "topic": "..." }
 |------|-----|
 | `flow_create` | Create a new flow definition and save it to a JSON file |
 | `flow_delete` | Soft-delete a flow (moves to `.clawflow/bin/` with timestamp) |
-| `flow_restore` | List bin contents or restore a deleted flow |
-| `flow_edit` | Edit a flow: set top-level fields, modify nodes (update, add, remove, move, wrap, list). All actions search recursively through nested structures. Use `parent` to target nested node lists (e.g. `"myBranch/true"`, `"myLoop"`). Use `wrap` to wrap nodes into a new container (loop, condition, branch, parallel). |
+| `flow_restore_from_bin` | List bin contents or restore a deleted flow from `.clawflow/bin/` |
+| `flow_list` | List all flows with metadata, expected inputs, and version info |
+| `flow_read` | Read a flow definition (draft or specific version), inspect single nodes |
+| `flow_publish` | Publish current draft as a new numbered version |
+| `flow_edit` | Edit a flow: set top-level fields, modify nodes (update, add, remove, move, wrap, revert, list). Use `parent` for nested targets (e.g. `"myBranch/true"`, `"myLoop"`). Use `wrap` to wrap nodes into containers. |
 | `flow_resume` | Resume a paused flow after approval (`instanceId`, `approved: true/false`, `flow`) |
 | `flow_send_event` | Push an event into a waiting flow (`instanceId`, `eventType`, `payload`) |
 | `flow_status` | Check status of a flow instance or list all instances |
-| `flow_transpile` | Convert a flow to Cloudflare Workers TypeScript |
