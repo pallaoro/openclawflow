@@ -40,7 +40,7 @@ A flow is JSON with a `flow` name, an optional `env` block, and a `nodes` array.
 | `memory` | Persistent key/value store | `action: "read"\|"write"\|"delete"`, `key` |
 | `wait` | Human approval gate or external event wait | `for: "approval"\|"event"`, `prompt`, `preview`, `timeout` |
 | `sleep` | Pause for a duration | `duration: "5m"` |
-| `code` | Inline JS expression (for scripts, use `exec`) | `run`, `input` |
+| `code` | Sandboxed JS expression — pure data transforms only. No `require`, no `fs`, no network. Use `exec` for anything that touches the filesystem or external modules. | `run`, `input` |
 
 ### Rules
 
