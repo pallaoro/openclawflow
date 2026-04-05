@@ -44,10 +44,11 @@ function register(api: PluginApi) {
   const pluginCfg: PluginConfig = { ...rawCfg };
 
   // Resolve workspace root once at registration time.
-  // Try: env var → api.config.workspace → cwd()
+  // Try: env var → api.config.workspace → OpenClaw default → cwd()
   const workspace: string =
     process.env.OPENCLAW_WORKSPACE ??
     (api.config as Record<string, unknown> | undefined)?.workspace as string ??
+    (process.env.HOME ? `${process.env.HOME}/.openclaw/workspace` : null) ??
     process.cwd();
 
   api.logger?.info(`clawflow workspace: ${workspace}`);
