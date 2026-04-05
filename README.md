@@ -41,7 +41,7 @@ Workflows today are written **for** agents, not **by** them. Visual canvas tools
 
 1. **An LLM must be able to write a valid workflow in a single turn.** If the format is too complex, agents hallucinate. If it's too simple, real workflows can't be expressed.
 
-2. **The format is the asset, not the runtime.** Write once, run as an OpenClaw plugin today, deploy to Cloudflare Workers tomorrow, run in a standalone server next month.
+2. **The format is the asset, not the runtime.** Write once, run as an OpenClaw plugin today, run in a standalone server tomorrow.
 
 3. **AI nodes are first-class citizens.** `do: ai` and `do: agent` are core primitives with structured output, model selection, and schema validation — not HTTP calls with extra steps.
 
@@ -68,9 +68,9 @@ Workflows today are written **for** agents, not **by** them. Visual canvas tools
 
 ### Portability
 - **OpenClaw plugin** — run flows as agent tools today
-- **Cloudflare transpiler** — convert to `WorkflowEntrypoint` TypeScript
 - **Standalone runner** — self-hosted Node.js server (coming soon)
 - **Static validation** — catch bad references and missing fields before execution
+- **Draft/publish versioning** — edit safely, publish when ready, run any version
 
 ---
 
@@ -107,7 +107,6 @@ A flow is JSON. No custom syntax, no new language — just structured data that 
             "name": "handle-billing",
             "do": "agent",
             "task": "Draft a billing support reply for: {{ trigger.body }}",
-            "model": "smart",
             "output": "draft"
           }
         ],
@@ -116,7 +115,6 @@ A flow is JSON. No custom syntax, no new language — just structured data that 
             "name": "handle-technical",
             "do": "agent",
             "task": "Draft a technical support reply for: {{ trigger.body }}",
-            "model": "smart",
             "output": "draft"
           }
         ]
@@ -126,7 +124,6 @@ A flow is JSON. No custom syntax, no new language — just structured data that 
           "name": "handle-general",
           "do": "agent",
           "task": "Draft a general support reply for: {{ trigger.body }}",
-          "model": "smart",
           "output": "draft"
         }
       ]
@@ -180,7 +177,7 @@ The most important node. A single LLM call that returns structured or freeform o
 | `prompt` | The instruction to the model. Supports `{{ templates }}`. |
 | `input` | Dotted path to a value in flow state passed as context |
 | `schema` | Output shape. When set, enforces JSON mode. Keys are type hints. |
-| `model` | `fast` (Haiku), `smart` (Sonnet), `best` (Opus), or any model string |
+| `model` | `fast` (Gemini 3 Flash), `smart` (Claude Sonnet 4.6), `best` (Minimax M2.5), or any model string |
 | `temperature` | 0–1, default 0 for deterministic workflow steps |
 
 **Why schema matters:** downstream nodes reference `classification.category` as a reliable string. Without schema, the output is freeform text and you're back to parsing.
@@ -210,7 +207,6 @@ On OpenClaw, this delegates to `openclaw agent --agent <id> --message "..."`. Th
 | `agent` | OpenClaw agent ID (e.g. `"main"`, `"ops"`). Uses config `defaultAgent` or `"main"` if omitted. |
 | `input` | Dotted path to context passed with the task |
 | `tools` | Hint for non-OpenClaw runtimes (OpenClaw agents have their own tool policy) |
-| `model` | Model for fallback AI call (standalone mode only) |
 
 The distinction between `ai` and `agent` is intentional:
 - `do: ai` = deterministic, one-shot, structured output — use for classification, drafting, extraction
@@ -507,15 +503,21 @@ The format is the spec. The runtime is swappable.
 
 ### 1. OpenClaw Plugin (current)
 
-Five tools registered in OpenClaw:
+Eleven tools registered in OpenClaw:
 
 | Tool | Does |
 |---|---|
-| `flow_run` | Execute a flow inline or from a file |
+| `flow_create` | Create a new flow definition and save to file |
+| `flow_delete` | Soft-delete a flow (moves to `.clawflow/bin/`) |
+| `flow_restore_from_bin` | List bin contents or restore a deleted flow |
+| `flow_run` | Execute a flow (uses latest published version by default) |
 | `flow_resume` | Resume after an approval gate |
 | `flow_send_event` | Push an event into a waiting flow |
 | `flow_status` | Inspect any running or completed instance |
-| `flow_transpile` | Convert a flow to Cloudflare Workers TypeScript |
+| `flow_list` | List all flows with metadata, expected inputs, and version info |
+| `flow_read` | Read a flow definition (draft or specific version), inspect single nodes |
+| `flow_publish` | Publish current draft as a new numbered version |
+| `flow_edit` | Edit nodes in a flow definition (set, update, add, remove, move, wrap, revert, list) |
 
 **Config:**
 ```json
@@ -531,7 +533,7 @@ Five tools registered in OpenClaw:
   "agents": {
     "list": [{
       "id": "main",
-      "tools": { "alsoAllow": ["flow_run", "flow_resume", "flow_send_event", "flow_status", "flow_transpile"] }
+      "tools": { "alsoAllow": ["flow_create", "flow_delete", "flow_restore_from_bin", "flow_run", "flow_resume", "flow_send_event", "flow_status", "flow_list", "flow_read", "flow_publish", "flow_edit"] }
     }]
   }
 }
@@ -539,33 +541,7 @@ Five tools registered in OpenClaw:
 
 ---
 
-### 2. Cloudflare Workers + Workflows (transpiler)
-
-`flow_transpile` converts any `.flow` definition to a complete Cloudflare `WorkflowEntrypoint` TypeScript class.
-
-Node mapping:
-
-| clawflow | Cloudflare Workflows |
-|---|---|
-| `do: ai` | `step.do()` with AI provider call |
-| `do: agent` | `step.do()` with extended AI call |
-| `do: wait / for: event` | `step.waitForEvent({ type, timeout })` |
-| `do: sleep` | `step.sleep(name, duration)` |
-| `do: parallel / mode: race` | `Promise.race([step.do, ...])` |
-| `do: parallel / mode: all` | `Promise.all([step.do, ...])` |
-| `do: http` | `step.do()` wrapping `fetch()` |
-| `do: memory` | `step.do()` wrapping KV/D1 |
-| retry policy | `step.do(name, config, callback)` |
-
-The transpiler gives you:
-- **Durable execution** — Cloudflare guarantees steps complete exactly once, globally
-- **Long-running flows** — minutes, hours, weeks — without timeouts
-- **Global scale** — Cloudflare's network, not your server
-- **Audit trail** — Cloudflare's Workflows dashboard shows every step
-
----
-
-### 3. Standalone Node.js Runner (coming soon)
+### 2. Standalone Node.js Runner (coming soon)
 
 A small HTTP server wrapping the runner. Expose flows as endpoints, receive webhooks, manage instances via REST API. Self-hosted alternative to Cloudflare.
 
@@ -579,7 +555,7 @@ GET   /flows/instances/:id   # get instance status
 
 ---
 
-### 4. Flow Registry (coming soon)
+### 3. Flow Registry (coming soon)
 
 A community library of reusable, shareable `.flow` definitions. Think npm for workflows — but agent-writable.
 
@@ -660,9 +636,9 @@ Rules:
 ## What's Next
 
 - Standalone HTTP runner (self-hosted, no OpenClaw dependency)
-- Webhook and cron triggers
 - Observability: structured traces, token tracking
 - Flow registry: shareable, reusable community flows
+- Cloudflare Workers transpiler
 - Visual canvas
 
 ---
@@ -672,38 +648,38 @@ Rules:
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        .flow definition                         │
-│              (JSON/YAML — the portable format spec)             │
+│                   (JSON — the portable format spec)             │
 └──────────────────────────────┬──────────────────────────────────┘
                                │
-           ┌───────────────────┼───────────────────┐
-           │                   │                   │
-    ┌──────▼──────┐    ┌───────▼──────┐   ┌────────▼───────┐
-    │  OpenClaw   │    │  Cloudflare  │   │   Standalone   │
-    │   Plugin    │    │   Workers    │   │  Node Server   │
-    │             │    │   (via       │   │   (coming soon)    │
-    │ flow_run    │    │  transpiler) │   │                │
-    │ flow_resume │    │              │   │ REST API       │
-    │ flow_status │    │ step.do()    │   │ Webhook recv   │
-    │ flow_event  │    │ waitForEvent │   │ Cron trigger   │
-    └──────┬──────┘    └──────────────┘   └────────────────┘
-           │
-    ┌──────▼──────────────────────────────┐
-    │            FlowRunner               │
-    │                                     │
-    │  ┌─────────┐   ┌─────────────────┐  │
-    │  │ State   │   │   Event Bus     │  │
-    │  │ Store   │   │ (waitForEvent)  │  │
-    │  │         │   │                 │  │
-    │  │ memoize │   │ sendEvent()     │  │
-    │  │ resume  │   │ per instanceId  │  │
-    │  └─────────┘   └─────────────────┘  │
-    │                                     │
-    │  Node executors:                    │
-    │  execAi · execAgent · execBranch    │
-    │  execLoop · execParallel · execHttp │
-    │  execMemory · execWait · execSleep  │
-    │  execCode                           │
-    └─────────────────────────────────────┘
+                ┌──────────────┼──────────────┐
+                │                             │
+         ┌──────▼──────┐             ┌────────▼───────┐
+         │  OpenClaw   │             │   Standalone   │
+         │   Plugin    │             │  Node Server   │
+         │             │             │  (coming soon) │
+         │ 11 tools    │             │                │
+         │ versioning  │             │ REST API       │
+         │ webhooks    │             │ Webhook recv   │
+         └──────┬──────┘             └────────────────┘
+                │
+         ┌──────▼──────────────────────────────┐
+         │            FlowRunner               │
+         │                                     │
+         │  ┌─────────┐   ┌─────────────────┐  │
+         │  │ State   │   │   Event Bus     │  │
+         │  │ Store   │   │ (waitForEvent)  │  │
+         │  │         │   │                 │  │
+         │  │ memoize │   │ sendEvent()     │  │
+         │  │ resume  │   │ per instanceId  │  │
+         │  └─────────┘   └─────────────────┘  │
+         │                                     │
+         │  Node executors:                    │
+         │  execAi · execAgent · execBranch    │
+         │  execCondition · execLoop           │
+         │  execParallel · execHttp            │
+         │  execMemory · execWait · execSleep  │
+         │  execCode · execExec                │
+         └─────────────────────────────────────┘
 ```
 
 ---
@@ -712,13 +688,17 @@ Rules:
 
 The most valuable contributions right now:
 
-1. **Real-world flow definitions** — try to describe a workflow you actually run, generate the `.flow` JSON, and report where the format breaks down
-2. **Transpiler completeness** — test the Cloudflare transpiler output and file issues for nodes that don't map cleanly
-3. **Node type proposals** — what's the 10th node type? What real workflow pattern can't be expressed with the current 9?
-4. **Runtime implementations** — a Python runner, a Go runner, a Rust runner — anything that proves portability
+1. **Real-world flow definitions** — try to describe a workflow you actually run, generate the flow JSON, and report where the format breaks down
+2. **Node type proposals** — what real workflow pattern can't be expressed with the current 11 node types?
+3. **Runtime implementations** — a Python runner, a Go runner, a Rust runner — anything that proves portability
+4. **Bug reports** — file issues at [github.com/clawnify/clawflow](https://github.com/clawnify/clawflow/issues)
 
 ---
 
 ## License
 
 MIT
+
+---
+
+Built by [Clawnify](https://www.clawnify.com) — AI agent hosting and orchestration.
