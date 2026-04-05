@@ -43,6 +43,15 @@ function register(api: PluginApi) {
 
   const pluginCfg: PluginConfig = { ...rawCfg };
 
+  // Resolve workspace root once at registration time.
+  // Try: env var → api.config.workspace → cwd()
+  const workspace: string =
+    process.env.OPENCLAW_WORKSPACE ??
+    (api.config as Record<string, unknown> | undefined)?.workspace as string ??
+    process.cwd();
+
+  api.logger?.info(`clawflow workspace: ${workspace}`);
+
   const runner = new FlowRunner(pluginCfg);
   const store = runner.getStore();
 
@@ -61,7 +70,7 @@ function register(api: PluginApi) {
   /** Resolve a file param to an absolute path using workspace conventions. */
   function resolveFlowFile(file: string): string {
     const path = require("path") as typeof import("path");
-    const base = process.env.OPENCLAW_WORKSPACE ?? process.cwd();
+    const base = workspace;
     if (file.startsWith("/")) return file;
     if (file.includes("/")) return path.join(base, file);
     const name = file.replace(/\.json$/, "");
@@ -71,7 +80,7 @@ function register(api: PluginApi) {
   /** Get the versions directory for a flow name. */
   function versionsDir(flowName: string): string {
     const path = require("path") as typeof import("path");
-    const base = process.env.OPENCLAW_WORKSPACE ?? process.cwd();
+    const base = workspace;
     return path.join(base, ".clawflow", "versions", flowName);
   }
 
@@ -176,7 +185,7 @@ All nodes require "name" and "do". Templates: {{ outputKey.field }}.`,
         const fs = await import("fs");
         const path = await import("path");
 
-        const base = process.env.OPENCLAW_WORKSPACE ?? process.cwd();
+        const base = workspace;
 
         let abs: string;
         if (params.file.startsWith("/")) {
@@ -220,7 +229,19 @@ All nodes require "name" and "do". Templates: {{ outputKey.field }}.`,
             ],
           };
 
-        fs.mkdirSync(path.dirname(abs), { recursive: true });
+        try {
+          fs.mkdirSync(path.dirname(abs), { recursive: true });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Cannot create directory for ${abs}: ${msg}. Is OPENCLAW_WORKSPACE set? Current workspace root: ${base}`,
+              },
+            ],
+          };
+        }
         fs.writeFileSync(abs, JSON.stringify(flowDef, null, 2) + "\n");
 
         return {
@@ -267,7 +288,7 @@ Safe for agents to call without fear of data loss.`,
         const fs = await import("fs");
         const path = await import("path");
 
-        const base = process.env.OPENCLAW_WORKSPACE ?? process.cwd();
+        const base = workspace;
 
         let abs: string;
         if (params.file.startsWith("/")) {
@@ -335,7 +356,7 @@ directory. If the flow file already exists, the restore is rejected.`,
         const fs = await import("fs");
         const path = await import("path");
 
-        const base = process.env.OPENCLAW_WORKSPACE ?? process.cwd();
+        const base = workspace;
         const binDir = path.join(base, ".clawflow", "bin");
 
         if (!fs.existsSync(binDir))
@@ -806,7 +827,7 @@ Use this to discover available flows before running or editing them.`,
         const fs = await import("fs");
         const path = await import("path");
 
-        const base = process.env.OPENCLAW_WORKSPACE ?? process.cwd();
+        const base = workspace;
 
         let dir: string;
         if (!params.dir) {
@@ -1312,7 +1333,7 @@ Examples:
         if (params.file) {
           const fs = await import("fs");
           const pathMod = await import("path");
-          const base = process.env.OPENCLAW_WORKSPACE ?? process.cwd();
+          const base = workspace;
           let abs: string;
           if (params.file.startsWith("/")) {
             abs = params.file;
@@ -1471,18 +1492,24 @@ Examples:
           }
         };
 
-        // Save a snapshot before mutating (file-based flows only)
+        // Save a snapshot before mutating (file-based flows only).
+        // Derive history dir from the flow file's parent (sibling to flows/).
         const saveSnapshot = async () => {
           if (!filePath) return;
           const fs = await import("fs");
           const pathMod = await import("path");
-          const base = process.env.OPENCLAW_WORKSPACE ?? process.cwd();
+          const flowDir = pathMod.dirname(filePath);
+          const root = pathMod.dirname(flowDir); // parent of flows/
           const flowName = pathMod.basename(filePath, ".json");
-          const histDir = pathMod.join(base, ".clawflow", "history", flowName);
-          fs.mkdirSync(histDir, { recursive: true });
-          const ts = new Date().toISOString().replace(/[:.]/g, "-");
-          const snapPath = pathMod.join(histDir, `${ts}.json`);
-          fs.writeFileSync(snapPath, fs.readFileSync(filePath, "utf8"));
+          const histDir = pathMod.join(root, ".clawflow", "history", flowName);
+          try {
+            fs.mkdirSync(histDir, { recursive: true });
+            const ts = new Date().toISOString().replace(/[:.]/g, "-");
+            const snapPath = pathMod.join(histDir, `${ts}.json`);
+            fs.writeFileSync(snapPath, fs.readFileSync(filePath, "utf8"));
+          } catch {
+            // History is best-effort — don't block the edit
+          }
         };
 
         // ---- Revert (undo last edit) ---
@@ -1491,9 +1518,10 @@ Examples:
             return fail("Revert only works on file-based flows.");
           const fs = await import("fs");
           const pathMod = await import("path");
-          const base = process.env.OPENCLAW_WORKSPACE ?? process.cwd();
+          const flowDir = pathMod.dirname(filePath);
+          const root = pathMod.dirname(flowDir);
           const flowName = pathMod.basename(filePath, ".json");
-          const histDir = pathMod.join(base, ".clawflow", "history", flowName);
+          const histDir = pathMod.join(root, ".clawflow", "history", flowName);
           if (!fs.existsSync(histDir))
             return fail("No edit history found for this flow.");
           const snaps = fs.readdirSync(histDir)
