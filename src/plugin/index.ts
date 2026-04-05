@@ -5,7 +5,7 @@ import { validateFlow } from "../core/validate.js";
 import type { FlowDefinition, FlowNode, PluginConfig, BranchNode, ConditionNode, LoopNode, ParallelNode } from "../core/types.js";
 
 // ---- OpenClaw Plugin: clawflow ---------------------------------------------------
-// Registers nine tools:
+// Registers ten tools:
 //
 //   flow_create        — create a new flow definition and save to file
 //   flow_delete        — soft-delete a flow (moves to .bin/)
@@ -14,6 +14,7 @@ import type { FlowDefinition, FlowNode, PluginConfig, BranchNode, ConditionNode,
 //   flow_resume        — resume after approval gate
 //   flow_send_event    — push an event into a waiting flow
 //   flow_status        — inspect a running/completed flow instance
+//   flow_list          — list all saved flow definitions in the workspace
 //   flow_transpile     — convert a .flow definition to Cloudflare Workers TS
 //   flow_edit          — edit nodes in a flow definition (file or inline)
 
@@ -672,6 +673,120 @@ Status values: running | completed | paused | waiting | failed | cancelled`,
             { type: "text", text: JSON.stringify(summary, null, 2) },
           ],
           details: summary,
+        };
+      },
+    },
+    { optional: true },
+  );
+
+  // ---- flow_list ----------------------------------------------------------------
+
+  api.registerTool(
+    {
+      name: "flow_list",
+      description: `List all saved flow definitions in the workspace.
+
+Scans the flows directory for .json files and returns a summary of each flow
+including its name, description, trigger, version, node count, and file path.
+Use this to discover available flows before running or editing them.`,
+
+      parameters: {
+        type: "object",
+        properties: {
+          dir: {
+            type: "string",
+            description:
+              "Directory to scan. Defaults to workspace/flows/. Absolute paths are used as-is; relative paths resolve from the workspace root.",
+          },
+        },
+      },
+
+      async execute(
+        _id: string,
+        params: { dir?: string },
+      ) {
+        const fs = await import("fs");
+        const path = await import("path");
+
+        const base = process.env.OPENCLAW_WORKSPACE ?? process.cwd();
+
+        let dir: string;
+        if (!params.dir) {
+          dir = path.join(base, "flows");
+        } else if (params.dir.startsWith("/")) {
+          dir = params.dir;
+        } else {
+          dir = path.join(base, params.dir);
+        }
+
+        if (!fs.existsSync(dir)) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Flows directory not found: ${dir}`,
+              },
+            ],
+          };
+        }
+
+        const files = fs.readdirSync(dir).filter((f: string) => f.endsWith(".json"));
+
+        if (files.length === 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `No flow files found in ${dir}`,
+              },
+            ],
+          };
+        }
+
+        const flows: Array<{
+          file: string;
+          flow: string;
+          description?: string;
+          version?: string;
+          trigger?: unknown;
+          nodes: number;
+        }> = [];
+
+        for (const file of files) {
+          const abs = path.join(dir, file);
+          try {
+            const raw = fs.readFileSync(abs, "utf-8");
+            const def = JSON.parse(raw) as FlowDefinition;
+            if (!def.flow || !Array.isArray(def.nodes)) continue;
+            flows.push({
+              file: abs,
+              flow: def.flow,
+              ...(def.description && { description: def.description }),
+              ...(def.version && { version: def.version }),
+              ...(def.trigger && { trigger: def.trigger }),
+              nodes: def.nodes.length,
+            });
+          } catch {
+            // skip non-flow JSON files
+          }
+        }
+
+        if (flows.length === 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `No valid flow definitions found in ${dir}`,
+              },
+            ],
+          };
+        }
+
+        return {
+          content: [
+            { type: "text", text: JSON.stringify(flows, null, 2) },
+          ],
+          details: flows,
         };
       },
     },
