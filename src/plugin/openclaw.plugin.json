@@ -21,7 +21,7 @@
     "apiKey": { "label": "Anthropic API Key", "sensitive": true, "help": "Used when ANTHROPIC_API_KEY env var is not set" },
     "defaultModel": { "label": "Default AI Model", "placeholder": "smart" },
     "baseUrl": { "label": "Direct API Base URL", "placeholder": "https://api.anthropic.com" },
-    "defaultAgent": { "label": "Agent ID for do:agent nodes", "placeholder": "ops", "help": "OpenClaw agent ID to delegate agent tasks to. Uses --local (embedded) if unset." },
+    "defaultAgent": { "label": "Agent ID for do:agent nodes", "placeholder": "clawflow", "help": "OpenClaw agent ID to delegate agent tasks to. Uses --local (embedded) if unset." },
     "memoryDir": { "label": "Memory Directory" },
     "stateDir": { "label": "Flow State Directory" },
     "maxNodeDurationMs": { "label": "Node Timeout (ms)", "placeholder": "30000" }

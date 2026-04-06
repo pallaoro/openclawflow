@@ -807,7 +807,7 @@ export class FlowRunner {
       ? parseDuration(node.timeout)
       : undefined;
 
-    const cliResult = await this.tryOpenClawAgent(fullPrompt, node.agent, state, timeoutMs);
+    const cliResult = await this.tryOpenClawAgent(fullPrompt, node.agentId, state, timeoutMs);
     return { output: this.autoParseJson(cliResult) };
   }
 
@@ -828,7 +828,7 @@ export class FlowRunner {
       throw new Error("openclaw CLI not found — agent nodes require the openclaw CLI to be installed");
     }
 
-    // Resolution: node.agent > plugin config defaultAgent > "main"
+    // Resolution: node.agentId > plugin config defaultAgent > "main"
     const effectiveAgent = agentId ?? this.cfg.defaultAgent ?? "main";
     const args = ["agent", "--agent", effectiveAgent, "--message", message];
 

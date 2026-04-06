@@ -30,7 +30,7 @@ A flow is JSON with a `flow` name, an optional `env` block, and a `nodes` array.
 | Node | Purpose | Key fields |
 |------|---------|------------|
 | `ai` | Single LLM call, structured or freeform | `prompt`, `schema`, `model`, `input`, `attachments` |
-| `agent` | Delegate to a real OpenClaw agent (with tools, browser, etc.) | `task`, `agent`, `tools` |
+| `agent` | Delegate to a real OpenClaw agent (with tools, browser, etc.) | `task`, `agentId`, `tools` |
 | `exec` | Run a shell command deterministically (no AI) | `command`, `cwd` |
 | `branch` | Multi-way routing with inline sub-flows per path | `on`, `paths`, `default` |
 | `condition` | If/else with sub-node blocks that reconverge | `if`, `then`, `else` |
@@ -52,7 +52,7 @@ A flow is JSON with a `flow` name, an optional `env` block, and a `nodes` array.
 - Use `do: exec` for deterministic operations (scripts, file processing, CLI tools) — never use `do: agent` for pure shell commands
 - Use `do: agent` for tasks that need tools (browser, exec, memory, MCP, CLI) — delegates to a real OpenClaw agent
 - Use `do: ai` for structured extraction and single-turn LLM calls
-- Set `agent: "ops"` on agent nodes to target a specific OpenClaw agent ID
+- Set `agentId: "clawflow"` on agent nodes to target a specific OpenClaw agent ID
 - Use `do: wait` with `for: approval` before any side effects that need human review — it pauses the flow, provides a token, and shows preview data to the approver
 - Use `do: wait` with `for: event` to wait for external events (webhooks, signals)
 - `do: condition` for boolean if/else, `do: branch` for multi-way value matching — both run inline sub-flows and reconverge
@@ -275,6 +275,74 @@ extract (agent) → parse (ai+schema) → loop:
   ├─ exec: run script with {{ data | json }}
 → email (agent with {{ results[*].field }})
 ```
+
+### do: agent — exec approval setup
+
+Agent nodes delegate to a real OpenClaw agent via `openclaw agent --agent <id> --message <task>`. By default, the spawned agent uses the "main" profile, which may prompt for exec approval on every shell command — blocking unattended flows.
+
+To run agent nodes without interactive prompts, create a dedicated `clawflow` agent with full exec access:
+
+**1. Create the agent:**
+
+```bash
+openclaw agents add clawflow
+```
+
+**2. In `openclaw.json`**, add the agent to `agents.list`. It shares the main workspace (scripts, flows, and skills live there) but gets its own exec policy via `tools.exec`:
+
+```json5
+{
+  agents: {
+    list: [
+      { id: "main", default: true },
+      {
+        id: "clawflow",
+        tools: {
+          deny: ["gateway", "cron", "tts"],
+          exec: { security: "full", ask: "off" }
+        }
+      }
+    ]
+  }
+}
+```
+
+`tools.deny` controls which tools exist; `tools.exec.*` controls how exec runs. Both matter.
+
+**3. Set exec approvals** for the `clawflow` agent (no interactive prompts):
+
+```bash
+openclaw approvals set --stdin <<'EOF'
+{
+  "version": 1,
+  "agents": {
+    "clawflow": {
+      "security": "full",
+      "ask": "off",
+      "askFallback": "full"
+    }
+  }
+}
+EOF
+```
+
+**4. Set `agentId` on agent nodes:**
+
+```json
+{
+  "name": "research_topic",
+  "do": "agent",
+  "agentId": "clawflow",
+  "task": "Research the latest trends in {{ trigger.topic }}",
+  "timeout": "240s",
+  "output": "research"
+}
+```
+
+- `agentId` defaults to `"main"` if omitted (backward compatible)
+- `security: "full"` + `ask: "off"` + `askFallback: "full"` = no prompts, all exec allowed
+- The main interactive agent stays locked down with its own allowlist
+- `exec-approvals.json` is per-agent — the `clawflow` entry only affects flow-spawned runs
 
 ## Example: LinkedIn post generator
 
