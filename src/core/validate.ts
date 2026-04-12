@@ -153,6 +153,25 @@ function validateNodes(
   }
 }
 
+// ---- Allowed keys per node type (BaseNode keys are always allowed) ----------------
+
+const BASE_KEYS = new Set(["name", "do", "output", "retry", "timeout"]);
+
+const ALLOWED_KEYS: Record<string, Set<string>> = {
+  ai: new Set([...BASE_KEYS, "prompt", "input", "schema", "model", "temperature", "maxTokens", "attachments"]),
+  agent: new Set([...BASE_KEYS, "task", "input", "tools", "agentId"]),
+  branch: new Set([...BASE_KEYS, "on", "paths", "default"]),
+  condition: new Set([...BASE_KEYS, "if", "then", "else"]),
+  loop: new Set([...BASE_KEYS, "over", "as", "nodes"]),
+  parallel: new Set([...BASE_KEYS, "nodes", "mode"]),
+  http: new Set([...BASE_KEYS, "url", "method", "body", "headers"]),
+  memory: new Set([...BASE_KEYS, "action", "key", "value"]),
+  wait: new Set([...BASE_KEYS, "for", "prompt", "preview", "event"]),
+  sleep: new Set([...BASE_KEYS, "duration"]),
+  code: new Set([...BASE_KEYS, "run", "input"]),
+  exec: new Set([...BASE_KEYS, "command", "cwd"]),
+};
+
 /** Validate required fields per node type */
 function validateNodeFields(node: FlowNode, errors: ValidationError[]): void {
   const e = (field: string, msg: string) =>
@@ -162,6 +181,16 @@ function validateNodeFields(node: FlowNode, errors: ValidationError[]): void {
   if (!nodeType) {
     e("do", `Node "${node.name}" is missing "do" field`);
     return;
+  }
+
+  // Check for unknown keys
+  const allowed = ALLOWED_KEYS[nodeType];
+  if (allowed) {
+    for (const key of Object.keys(node)) {
+      if (!allowed.has(key)) {
+        e(key, `Unknown field "${key}" on ${nodeType} node "${node.name}"`);
+      }
+    }
   }
 
   switch (nodeType) {

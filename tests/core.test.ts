@@ -1166,6 +1166,38 @@ describe("validateFlow", () => {
     assert.equal(result.ok, true);
   });
 
+  it("catches branch path placed as sibling of paths", () => {
+    const flow: FlowDefinition = {
+      flow: "misplaced-branch-path",
+      nodes: [
+        { name: "classify", do: "code" as const, run: "'densita'", output: "order_type" },
+        {
+          name: "route", do: "branch" as const, on: "order_type",
+          paths: {
+            densita: [{ name: "d1", do: "code" as const, run: "'ok'", output: "x" }],
+          },
+          // This is the bug: diametri is a sibling of paths, not inside it
+          diametri: [{ name: "d2", do: "code" as const, run: "'ok'", output: "y" }],
+        } as any,
+      ],
+    };
+    const result = validateFlow(flow);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.message.includes("Unknown field \"diametri\"")));
+  });
+
+  it("catches unknown fields on any node type", () => {
+    const flow: FlowDefinition = {
+      flow: "unknown-field",
+      nodes: [
+        { name: "bad", do: "ai" as const, prompt: "hello", bogus: true } as any,
+      ],
+    };
+    const result = validateFlow(flow);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.message.includes("Unknown field \"bogus\"")));
+  });
+
   it("catches unknown node type", () => {
     const flow: FlowDefinition = {
       flow: "unknown-type",
