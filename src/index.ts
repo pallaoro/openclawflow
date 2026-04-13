@@ -32,7 +32,7 @@ export type {
   CodeNode,
   ExecNode,
 } from "./core/types.js";
-export { parseDuration, MODEL_MAP, DEFAULT_MODEL } from "./core/types.js";
+export { parseDuration, MODEL_MAP, DEFAULT_MODEL, NODE_KEYS } from "./core/types.js";
 export { startWebhookServer } from "./core/serve.js";
 export type { WebhookServerOpts } from "./core/serve.js";
 export type { ServeConfig } from "./core/types.js";

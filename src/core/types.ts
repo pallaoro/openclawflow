@@ -58,6 +58,17 @@ export interface BaseNode {
   timeout?: string | number; // e.g. "30s", or ms integer
 }
 
+// Helper: compile-time check that a key tuple matches exactly the own keys of T (minus BaseNode).
+// If a key is added to an interface but not the tuple (or vice versa), this produces a type error
+// on the corresponding _XCheck variable below.
+type OwnKeys<T extends BaseNode> = Exclude<keyof T, keyof BaseNode>;
+type CheckKeys<T extends BaseNode, K extends readonly string[]> =
+  [OwnKeys<T>] extends [K[number]]
+    ? [K[number]] extends [OwnKeys<T>]
+      ? true
+      : "Extra key(s) in tuple not on interface"
+    : "Missing key(s) from interface in tuple";
+
 // ---- Node Types -----------------------------------------------------------------
 
 export interface AiNode extends BaseNode {
@@ -71,6 +82,8 @@ export interface AiNode extends BaseNode {
   /** File paths (images, PDFs) to include as multimodal content. Supports templates. */
   attachments?: string[];
 }
+const AI_KEYS = ["prompt", "input", "schema", "model", "temperature", "maxTokens", "attachments"] as const;
+const _aiCheck: CheckKeys<AiNode, typeof AI_KEYS> = true;
 
 export interface AgentNode extends BaseNode {
   do: "agent";
@@ -80,6 +93,8 @@ export interface AgentNode extends BaseNode {
   /** OpenClaw agent ID to delegate to (e.g. "main", "clawflow"). Uses OpenClaw's default routing if omitted. */
   agentId?: string;
 }
+const AGENT_KEYS = ["task", "input", "tools", "agentId"] as const;
+const _agentCheck: CheckKeys<AgentNode, typeof AGENT_KEYS> = true;
 
 export interface BranchNode extends BaseNode {
   do: "branch";
@@ -87,6 +102,8 @@ export interface BranchNode extends BaseNode {
   paths: Record<string, FlowNode[]>; // value -> sub-flow to execute
   default?: FlowNode[]; // sub-flow if no path matches
 }
+const BRANCH_KEYS = ["on", "paths", "default"] as const;
+const _branchCheck: CheckKeys<BranchNode, typeof BRANCH_KEYS> = true;
 
 export interface LoopNode extends BaseNode {
   do: "loop";
@@ -94,12 +111,16 @@ export interface LoopNode extends BaseNode {
   as: string; // variable name for current item
   nodes: FlowNode[];
 }
+const LOOP_KEYS = ["over", "as", "nodes"] as const;
+const _loopCheck: CheckKeys<LoopNode, typeof LOOP_KEYS> = true;
 
 export interface ParallelNode extends BaseNode {
   do: "parallel";
   nodes: FlowNode[];
   mode?: "all" | "race"; // "all" = wait for all, "race" = first wins
 }
+const PARALLEL_KEYS = ["nodes", "mode"] as const;
+const _parallelCheck: CheckKeys<ParallelNode, typeof PARALLEL_KEYS> = true;
 
 export interface HttpNode extends BaseNode {
   do: "http";
@@ -108,6 +129,8 @@ export interface HttpNode extends BaseNode {
   body?: string | Record<string, unknown>;
   headers?: Record<string, string>;
 }
+const HTTP_KEYS = ["url", "method", "body", "headers"] as const;
+const _httpCheck: CheckKeys<HttpNode, typeof HTTP_KEYS> = true;
 
 export interface MemoryNode extends BaseNode {
   do: "memory";
@@ -115,6 +138,8 @@ export interface MemoryNode extends BaseNode {
   key: string;
   value?: string; // required for write
 }
+const MEMORY_KEYS = ["action", "key", "value"] as const;
+const _memoryCheck: CheckKeys<MemoryNode, typeof MEMORY_KEYS> = true;
 
 /**
  * wait — pause for human approval or external event.
@@ -143,17 +168,23 @@ export interface WaitNode extends BaseNode {
   event?: string; // event type to match (for: event)
   timeout?: string; // e.g. "24h", "5m" -- fail if exceeded
 }
+const WAIT_KEYS = ["for", "prompt", "preview", "event"] as const;
+const _waitCheck: CheckKeys<WaitNode, typeof WAIT_KEYS> = true;
 
 export interface SleepNode extends BaseNode {
   do: "sleep";
   duration: string; // e.g. "30s", "5m", "2h", "1d"
 }
+const SLEEP_KEYS = ["duration"] as const;
+const _sleepCheck: CheckKeys<SleepNode, typeof SLEEP_KEYS> = true;
 
 export interface CodeNode extends BaseNode {
   do: "code";
   run: string;
   input?: string;
 }
+const CODE_KEYS = ["run", "input"] as const;
+const _codeCheck: CheckKeys<CodeNode, typeof CODE_KEYS> = true;
 
 /**
  * exec — run a shell command deterministically, no AI involved.
@@ -171,6 +202,8 @@ export interface ExecNode extends BaseNode {
   command: string;
   cwd?: string; // working directory (resolved via templates)
 }
+const EXEC_KEYS = ["command", "cwd"] as const;
+const _execCheck: CheckKeys<ExecNode, typeof EXEC_KEYS> = true;
 
 /**
  * condition — if/else with sub-node blocks that reconverge.
@@ -205,6 +238,29 @@ export interface ConditionNode extends BaseNode {
   then: FlowNode[]; // nodes to run when condition is true
   else?: FlowNode[]; // nodes to run when condition is false
 }
+const CONDITION_KEYS = ["if", "then", "else"] as const;
+const _conditionCheck: CheckKeys<ConditionNode, typeof CONDITION_KEYS> = true;
+
+// ---- Allowed Node Keys (derived from interfaces above) --------------------------
+// Used by the validator to reject unknown fields. The ExactKeys constraint ensures
+// a compile error if a key list drifts from its interface.
+
+const BASE_KEYS: readonly string[] = ["name", "do", "output", "retry", "timeout"];
+
+export const NODE_KEYS: Record<string, ReadonlySet<string>> = {
+  ai:        new Set([...BASE_KEYS, ...AI_KEYS]),
+  agent:     new Set([...BASE_KEYS, ...AGENT_KEYS]),
+  branch:    new Set([...BASE_KEYS, ...BRANCH_KEYS]),
+  condition: new Set([...BASE_KEYS, ...CONDITION_KEYS]),
+  loop:      new Set([...BASE_KEYS, ...LOOP_KEYS]),
+  parallel:  new Set([...BASE_KEYS, ...PARALLEL_KEYS]),
+  http:      new Set([...BASE_KEYS, ...HTTP_KEYS]),
+  memory:    new Set([...BASE_KEYS, ...MEMORY_KEYS]),
+  wait:      new Set([...BASE_KEYS, ...WAIT_KEYS]),
+  sleep:     new Set([...BASE_KEYS, ...SLEEP_KEYS]),
+  code:      new Set([...BASE_KEYS, ...CODE_KEYS]),
+  exec:      new Set([...BASE_KEYS, ...EXEC_KEYS]),
+};
 
 // ---- Runtime Types --------------------------------------------------------------
 
