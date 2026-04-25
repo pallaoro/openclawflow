@@ -174,6 +174,17 @@ export function startWebhookServer(opts: WebhookServerOpts): http.Server {
 
   activeServer = server;
 
+  server.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      log.warn(
+        `[clawflow] port ${serve.port} already in use — skipping webhook server (another clawflow instance likely owns it)`,
+      );
+      activeServer = null;
+      return;
+    }
+    log.error(`[clawflow] webhook server error: ${err.message}`);
+  });
+
   server.listen(serve.port, () => {
     log.info(
       `[clawflow] webhook server listening on :${serve.port}${basePath}/:flowName/webhook`,
