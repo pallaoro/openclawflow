@@ -4,15 +4,16 @@ import * as path from "path";
 import type { FlowDefinition, ServeConfig } from "./types.js";
 import type { FlowRunner } from "./runner.js";
 
-// ---- Webhook Server -------------------------------------------------------------
-// Lightweight HTTP server for triggering flows via POST requests.
-// Follows the same serve.port + serve.path pattern as clawvoice.
+// ---- Flow Server ----------------------------------------------------------------
+// Lightweight HTTP server that runs flows on POST. Trigger semantics (webhooks,
+// cron, manual UI) live in the calling platform, not the flow format — this
+// server is a generic invocation endpoint.
 //
 // Endpoints:
-//   POST /:basePath/:flowName/webhook  — trigger a flow with JSON body as input
-//   GET  /:basePath/health              — health check
+//   POST /:basePath/:flowName/run  — run a flow with the JSON body as inputs
+//   GET  /:basePath/health         — health check
 
-export interface WebhookServerOpts {
+export interface FlowServerOpts {
   runner: FlowRunner;
   serve: ServeConfig;
   logger?: {
@@ -81,7 +82,7 @@ function readBody(req: http.IncomingMessage): Promise<string> {
   });
 }
 
-export function startWebhookServer(opts: WebhookServerOpts): http.Server {
+export function startFlowServer(opts: FlowServerOpts): http.Server {
   if (activeServer) return activeServer;
 
   const { runner, serve, logger } = opts;
@@ -103,11 +104,11 @@ export function startWebhookServer(opts: WebhookServerOpts): http.Server {
       return;
     }
 
-    // Webhook trigger: POST /:basePath/:flowName/webhook
-    const webhookPattern = new RegExp(
-      `^${basePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/([a-zA-Z0-9_-]+)/webhook$`,
+    // Run a flow: POST /:basePath/:flowName/run
+    const runPattern = new RegExp(
+      `^${basePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/([a-zA-Z0-9_-]+)/run$`,
     );
-    const match = pathname.match(webhookPattern);
+    const match = pathname.match(runPattern);
 
     if (!match || req.method !== "POST") {
       json(res, 404, { error: "Not found" });
@@ -123,20 +124,12 @@ export function startWebhookServer(opts: WebhookServerOpts): http.Server {
         return;
       }
 
-      // Validate that the flow declares a webhook trigger
-      if (!flowDef.trigger || flowDef.trigger.on !== "webhook") {
-        json(res, 400, {
-          error: `Flow "${flowName}" does not declare trigger.on: "webhook"`,
-        });
-        return;
-      }
-
-      // Parse request body
-      let input: unknown = {};
+      // Parse request body — entire body becomes the flow's inputs payload.
+      let inputs: unknown = {};
       const rawBody = await readBody(req);
       if (rawBody) {
         try {
-          input = JSON.parse(rawBody);
+          inputs = JSON.parse(rawBody);
         } catch {
           json(res, 400, { error: "Invalid JSON body" });
           return;
@@ -145,13 +138,13 @@ export function startWebhookServer(opts: WebhookServerOpts): http.Server {
 
       // Fire-and-forget: start the flow, return immediately with instanceId
       const instanceId = crypto.randomUUID();
-      log.info(`[clawflow] webhook → ${flowName} (${instanceId})`);
+      log.info(`[clawflow] run → ${flowName} (${instanceId})`);
 
       // Respond 202 before the flow runs
       json(res, 202, { ok: true, instanceId, flow: flowName });
 
       // Run asynchronously — don't block the response
-      runner.run(flowDef, input, instanceId).then((result) => {
+      runner.run(flowDef, inputs, instanceId).then((result) => {
         if (!result.ok) {
           log.error(
             `[clawflow] flow "${flowName}" (${instanceId}) failed: ${result.error ?? "unknown error"}`,
@@ -166,7 +159,7 @@ export function startWebhookServer(opts: WebhookServerOpts): http.Server {
       });
     } catch (err) {
       log.error(
-        `[clawflow] webhook error: ${err instanceof Error ? err.message : String(err)}`,
+        `[clawflow] run error: ${err instanceof Error ? err.message : String(err)}`,
       );
       json(res, 500, { error: "Internal server error" });
     }
@@ -176,7 +169,7 @@ export function startWebhookServer(opts: WebhookServerOpts): http.Server {
 
   server.listen(serve.port, () => {
     log.info(
-      `[clawflow] webhook server listening on :${serve.port}${basePath}/:flowName/webhook`,
+      `[clawflow] flow server listening on :${serve.port}${basePath}/:flowName/run`,
     );
   });
 

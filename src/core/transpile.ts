@@ -122,7 +122,7 @@ function resolveTemplate(state: Record<string, unknown>, template: string): stri
 
 export class ${className} extends WorkflowEntrypoint<Env, Params> {
   async run(event: WorkflowEvent<Params>, step: WorkflowStep) {
-    const state: Record<string, unknown> = { trigger: event.payload };
+    const state: Record<string, unknown> = { inputs: event.payload };
 
 ${nodeCode}
 

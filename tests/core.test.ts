@@ -36,7 +36,7 @@ describe("FlowRunner — code node", () => {
     const flow: FlowDefinition = {
       flow: "test-code",
       nodes: [
-        { name: "double", do: "code" as const, run: "input * 2", input: "trigger.x", output: "result" },
+        { name: "double", do: "code" as const, run: "input * 2", input: "inputs.x", output: "result" },
       ],
     };
     const runner = new FlowRunner(cfg);
@@ -50,7 +50,7 @@ describe("FlowRunner — code node", () => {
     const flow: FlowDefinition = {
       flow: "test-code-state",
       nodes: [
-        { name: "greet", do: "code" as const, run: "`Hello ${state.trigger.name}`", input: "trigger", output: "greeting" },
+        { name: "greet", do: "code" as const, run: "`Hello ${state.inputs.name}`", input: "inputs", output: "greeting" },
       ],
     };
     const runner = new FlowRunner(cfg);
@@ -62,7 +62,7 @@ describe("FlowRunner — code node", () => {
     const flow: FlowDefinition = {
       flow: "test-code-multi",
       nodes: [
-        { name: "calc", do: "code" as const, run: "const x = input + 1;\nreturn x * 2;", input: "trigger.x", output: "result" },
+        { name: "calc", do: "code" as const, run: "const x = input + 1;\nreturn x * 2;", input: "inputs.x", output: "result" },
       ],
     };
     const runner = new FlowRunner(cfg);
@@ -75,7 +75,7 @@ describe("FlowRunner — code node", () => {
     const flow: FlowDefinition = {
       flow: "test-code-semi",
       nodes: [
-        { name: "calc", do: "code" as const, run: "const a = input.x; const b = input.y; return a + b;", input: "trigger", output: "result" },
+        { name: "calc", do: "code" as const, run: "const a = input.x; const b = input.y; return a + b;", input: "inputs", output: "result" },
       ],
     };
     const runner = new FlowRunner(cfg);
@@ -88,7 +88,7 @@ describe("FlowRunner — code node", () => {
     const flow: FlowDefinition = {
       flow: "test-code-frozen-state",
       nodes: [
-        { name: "mutate", do: "code" as const, run: "state.trigger.x = 999; return 1;", input: "trigger", output: "result" },
+        { name: "mutate", do: "code" as const, run: "state.inputs.x = 999; return 1;", input: "inputs", output: "result" },
       ],
     };
     const runner = new FlowRunner(cfg);
@@ -102,7 +102,7 @@ describe("FlowRunner — code node", () => {
     const flow: FlowDefinition = {
       flow: "test-code-frozen-input",
       nodes: [
-        { name: "mutate", do: "code" as const, run: "input.x = 999; return 1;", input: "trigger", output: "result" },
+        { name: "mutate", do: "code" as const, run: "input.x = 999; return 1;", input: "inputs", output: "result" },
       ],
     };
     const runner = new FlowRunner(cfg);
@@ -171,7 +171,7 @@ describe("FlowRunner — code node diagnostics", () => {
           name: "bad_access",
           do: "code" as const,
           run: "input.email_to",
-          input: "trigger.payload",
+          input: "inputs.payload",
           output: "result",
         },
       ],
@@ -185,7 +185,7 @@ describe("FlowRunner — code node diagnostics", () => {
     assert.match(result.error!, /email_to/);
     assert.match(result.error!, /Input keys:/);
     assert.match(result.error!, /client/);
-    assert.match(result.error!, /state\.trigger\.email_to/);
+    assert.match(result.error!, /state\.inputs\.email_to/);
   });
 
   it("catches chained access on missing property via Proxy", async () => {
@@ -196,7 +196,7 @@ describe("FlowRunner — code node diagnostics", () => {
           name: "bad_chain",
           do: "code" as const,
           run: "input.nested.deep",
-          input: "trigger.payload",
+          input: "inputs.payload",
           output: "result",
         },
       ],
@@ -220,7 +220,7 @@ describe("FlowRunner — code node diagnostics", () => {
           name: "good_access",
           do: "code" as const,
           run: "input.client",
-          input: "trigger.payload",
+          input: "inputs.payload",
           output: "result",
         },
       ],
@@ -258,7 +258,7 @@ describe("FlowRunner — exec node", () => {
     const flow: FlowDefinition = {
       flow: "test-exec-template",
       nodes: [
-        { name: "run-it", do: "exec" as const, command: "echo '{{ trigger.msg }}'", output: "result" },
+        { name: "run-it", do: "exec" as const, command: "echo '{{ inputs.msg }}'", output: "result" },
       ],
     };
     const runner = new FlowRunner(cfg);
@@ -463,7 +463,7 @@ describe("FlowRunner — condition node", () => {
       nodes: [
         {
           name: "check", do: "condition" as const,
-          if: "trigger.user.role == 'admin'",
+          if: "inputs.user.role == 'admin'",
           then: [
             { name: "admin-msg", do: "code" as const, run: "'admin panel'", output: "view" },
           ],
@@ -492,7 +492,7 @@ describe("FlowRunner — loop node", () => {
       flow: "test-loop",
       nodes: [
         {
-          name: "process", do: "loop" as const, over: "trigger.items", as: "item",
+          name: "process", do: "loop" as const, over: "inputs.items", as: "item",
           nodes: [
             { name: "transform", do: "code" as const, run: "input.toUpperCase()", input: "item", output: "transformed" },
           ],
@@ -514,7 +514,7 @@ describe("FlowRunner — loop node", () => {
       flow: "test-loop-wildcard",
       nodes: [
         {
-          name: "process_sheets", do: "loop" as const, over: "trigger.sheets", as: "sheet",
+          name: "process_sheets", do: "loop" as const, over: "inputs.sheets", as: "sheet",
           nodes: [
             { name: "build-path", do: "code" as const, run: "`/output/foglio_${state.sheet.type}.pdf`", output: "pdfPath" },
           ],
@@ -570,7 +570,7 @@ describe("FlowRunner — wait for approval (enhanced)", () => {
         { name: "prep", do: "code" as const, run: "({ files: ['/a.pdf', '/b.pdf'] })", output: "data" },
         {
           name: "review", do: "wait" as const, for: "approval",
-          prompt: "Review files for {{ trigger.client }}",
+          prompt: "Review files for {{ inputs.client }}",
           preview: "data.files",
           output: "approval",
         },
@@ -716,7 +716,7 @@ describe("FlowRunner — memory node", () => {
     const flow: FlowDefinition = {
       flow: "test-memory",
       nodes: [
-        { name: "save", do: "memory" as const, action: "write", key: "test-key", value: "{{ trigger.data }}" },
+        { name: "save", do: "memory" as const, action: "write", key: "test-key", value: "{{ inputs.data }}" },
         { name: "load", do: "memory" as const, action: "read", key: "test-key", output: "loaded" },
       ],
     };
@@ -847,7 +847,7 @@ describe("template filters", () => {
   after(cleanup);
 
   const state = {
-    trigger: { body: "hello world" },
+    inputs: { body: "hello world" },
     plan: { title: "My Plan", tags: ["a", "b", "c"] },
     data: { count: 42, nested: { x: 1, y: 2 }, text: "  padded  " },
   };
@@ -1132,11 +1132,11 @@ describe("validateFlow", () => {
     assert.ok(result.error?.includes("Validation failed"));
   });
 
-  it("allows trigger refs without prior nodes", () => {
+  it("allows inputs refs without prior nodes", () => {
     const flow: FlowDefinition = {
-      flow: "trigger-ref",
+      flow: "inputs-ref",
       nodes: [
-        { name: "greet", do: "ai" as const, prompt: "Hello {{ trigger.name }}", output: "msg" },
+        { name: "greet", do: "ai" as const, prompt: "Hello {{ inputs.name }}", output: "msg" },
       ],
     };
     const result = validateFlow(flow);
@@ -1159,7 +1159,7 @@ describe("validateFlow", () => {
     const flow: FlowDefinition = {
       flow: "exec-ref",
       nodes: [
-        { name: "run", do: "exec" as const, command: "echo '{{ trigger.x }}'", output: "out" },
+        { name: "run", do: "exec" as const, command: "echo '{{ inputs.x }}'", output: "out" },
       ],
     };
     const result = validateFlow(flow);
@@ -1395,7 +1395,7 @@ describe("attachments — unit tests", () => {
           name: "analyze",
           do: "ai" as const,
           prompt: "Analyze",
-          attachments: ["{{ trigger.imgPath }}"],
+          attachments: ["{{ inputs.imgPath }}"],
           output: "result",
         },
       ],
@@ -1469,7 +1469,7 @@ describe("attachments — unit tests", () => {
           name: "analyze",
           do: "ai" as const,
           prompt: "Check",
-          attachments: ["{{ trigger.path }}"],
+          attachments: ["{{ inputs.path }}"],
           output: "result",
         },
       ],

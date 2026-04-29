@@ -1,6 +1,6 @@
 {
   "name": "@clawnify/clawflow",
-  "version": "0.9.6",
+  "version": "1.0.0",
   "description": "The n8n for agents. A declarative, AI-native workflow format that agents can read, write, and run.",
   "type": "module",
   "main": "./dist/index.js",
@@ -20,6 +20,7 @@
     "test": "node --import tsx --test tests/*.test.ts",
     "lint": "tsc --noEmit",
     "clean": "rm -rf dist",
+    "migrate": "tsx scripts/migrate-to-1.0.ts",
     "prepublishOnly": "npm run build"
   },
   "openclaw": {
@@ -41,6 +42,7 @@
     "dist/**/*.d.ts.map",
     "index.ts",
     "src/**/*.ts",
+    "scripts/migrate-to-1.0.ts",
     "skills/**/*",
     "openclaw.plugin.json",
     "README.md",

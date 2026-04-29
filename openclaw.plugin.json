@@ -34,6 +34,6 @@
     "memoryDir": { "label": "Memory Directory" },
     "stateDir": { "label": "Flow State Directory" },
     "maxNodeDurationMs": { "label": "Node Timeout (ms)", "placeholder": "30000" },
-    "serve": { "label": "Webhook Server", "help": "Start an HTTP server for triggering flows via webhook. Requires at least port." }
+    "serve": { "label": "Flow HTTP Server", "help": "Start an HTTP server that runs flows on POST. Requires at least port. Endpoint: POST /<basePath>/<flowName>/run with the JSON body as the flow's inputs." }
   }
 }

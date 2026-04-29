@@ -129,9 +129,9 @@ function validateNodes(
   parentAvailable: Set<string>,
   errors: ValidationError[],
 ): void {
-  // Available keys: trigger and env are always available + anything from parent scope
+  // Available keys: inputs and env are always available + anything from parent scope
   const available = new Set(parentAvailable);
-  available.add("trigger");
+  available.add("inputs");
   available.add("env");
 
   for (const node of nodes) {
