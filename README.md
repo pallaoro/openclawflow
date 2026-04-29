@@ -82,13 +82,16 @@ A flow is JSON. No custom syntax, no new language — just structured data that 
 {
   "flow": "support-triage",
   "description": "Classify a ticket, draft a reply, get approval, send it",
-  "trigger": { "on": "webhook", "from": "helpdesk" },
+  "inputs": {
+    "body": { "type": "string", "required": true },
+    "id":   { "type": "string", "required": true }
+  },
   "nodes": [
     {
       "name": "classify",
       "do": "ai",
       "prompt": "Classify this ticket as billing, technical, or general",
-      "input": "trigger.body",
+      "input": "inputs.body",
       "schema": {
         "category": "billing | technical | general",
         "urgency": "low | medium | high",
@@ -106,7 +109,7 @@ A flow is JSON. No custom syntax, no new language — just structured data that 
           {
             "name": "handle-billing",
             "do": "agent",
-            "task": "Draft a billing support reply for: {{ trigger.body }}",
+            "task": "Draft a billing support reply for: {{ inputs.body }}",
             "output": "draft"
           }
         ],
@@ -114,7 +117,7 @@ A flow is JSON. No custom syntax, no new language — just structured data that 
           {
             "name": "handle-technical",
             "do": "agent",
-            "task": "Draft a technical support reply for: {{ trigger.body }}",
+            "task": "Draft a technical support reply for: {{ inputs.body }}",
             "output": "draft"
           }
         ]
@@ -123,7 +126,7 @@ A flow is JSON. No custom syntax, no new language — just structured data that 
         {
           "name": "handle-general",
           "do": "agent",
-          "task": "Draft a general support reply for: {{ trigger.body }}",
+          "task": "Draft a general support reply for: {{ inputs.body }}",
           "output": "draft"
         }
       ]
@@ -139,7 +142,7 @@ A flow is JSON. No custom syntax, no new language — just structured data that 
       "do": "http",
       "url": "https://helpdesk.example.com/api/reply",
       "method": "POST",
-      "body": { "message": "{{ draft }}", "ticketId": "{{ trigger.id }}" },
+      "body": { "message": "{{ draft }}", "ticketId": "{{ inputs.id }}" },
       "retry": { "limit": 3, "delay": "2s", "backoff": "exponential" }
     }
   ]
@@ -161,7 +164,7 @@ The most important node. A single LLM call that returns structured or freeform o
   "name": "classify",
   "do": "ai",
   "prompt": "Classify this support ticket",
-  "input": "trigger.body",
+  "input": "inputs.body",
   "schema": {
     "category": "billing | technical | general",
     "confidence": "number",
@@ -225,15 +228,15 @@ Routes the flow to a sub-flow based on a value in state. Each path is an array o
   "on": "classification.category",
   "paths": {
     "billing": [
-      { "name": "lookup-invoice", "do": "http", "url": "https://api.example.com/invoice/{{ trigger.id }}", "output": "invoice" },
+      { "name": "lookup-invoice", "do": "http", "url": "https://api.example.com/invoice/{{ inputs.id }}", "output": "invoice" },
       { "name": "draft-reply", "do": "ai", "prompt": "Draft billing reply for: {{ invoice }}", "output": "draft" }
     ],
     "technical": [
-      { "name": "draft-reply", "do": "agent", "task": "Research and draft technical reply for: {{ trigger.body }}", "output": "draft" }
+      { "name": "draft-reply", "do": "agent", "task": "Research and draft technical reply for: {{ inputs.body }}", "output": "draft" }
     ]
   },
   "default": [
-    { "name": "draft-reply", "do": "ai", "prompt": "Draft a general reply for: {{ trigger.body }}", "output": "draft" }
+    { "name": "draft-reply", "do": "ai", "prompt": "Draft a general reply for: {{ inputs.body }}", "output": "draft" }
   ]
 }
 ```
@@ -272,7 +275,7 @@ Supports comparison and logical operators:
 ```
 "classification.priority == 'urgent'"
 "validation.valid && items.length > 0"
-"trigger.amount > 1000 || trigger.vip == true"
+"inputs.amount > 1000 || inputs.vip == true"
 ```
 
 ---
@@ -341,7 +344,7 @@ Runs multiple nodes at the same time. Waits for all to complete (`mode: "all"`) 
 {
   "name": "notify-slack",
   "do": "http",
-  "url": "https://hooks.slack.com/services/{{ trigger.slackWebhook }}",
+  "url": "https://hooks.slack.com/services/{{ inputs.slackWebhook }}",
   "method": "POST",
   "body": { "text": "Ticket resolved: {{ classification.summary }}" },
   "retry": { "limit": 3, "delay": "1s", "backoff": "exponential" },
@@ -358,9 +361,9 @@ All fields support `{{ templates }}`. Retry is strongly recommended for any outb
 Read, write, or delete values that persist across flow runs.
 
 ```json
-{ "name": "save-result",  "do": "memory", "action": "write",  "key": "ticket-{{ trigger.id }}", "value": "{{ classification.category }}" }
-{ "name": "load-history", "do": "memory", "action": "read",   "key": "ticket-{{ trigger.id }}", "output": "previous_category" }
-{ "name": "cleanup",      "do": "memory", "action": "delete", "key": "ticket-{{ trigger.id }}" }
+{ "name": "save-result",  "do": "memory", "action": "write",  "key": "ticket-{{ inputs.id }}", "value": "{{ classification.category }}" }
+{ "name": "load-history", "do": "memory", "action": "read",   "key": "ticket-{{ inputs.id }}", "output": "previous_category" }
+{ "name": "cleanup",      "do": "memory", "action": "delete", "key": "ticket-{{ inputs.id }}" }
 ```
 
 In the OpenClaw plugin, memory persists to `~/.openclaw/flow-memory/`. In Cloudflare, it maps to KV or D1. Keys support templates.
@@ -420,7 +423,7 @@ Duration syntax: `30s`, `5m`, `2h`, `1d`. Maps directly to Cloudflare's `step.sl
 {
   "name": "format-date",
   "do": "code",
-  "input": "trigger.timestamp",
+  "input": "inputs.timestamp",
   "run": "new Date(input).toLocaleDateString('en-GB')",
   "output": "formatted_date"
 }
@@ -432,7 +435,7 @@ Single expressions are returned automatically. Multi-statement bodies (containin
 {
   "name": "calc",
   "do": "code",
-  "input": "trigger",
+  "input": "inputs",
   "run": "const total = input.price * input.qty;\nconst tax = total * 0.22;\nreturn { total, tax, grand: total + tax };",
   "output": "invoice"
 }
@@ -447,15 +450,17 @@ No imports, no async, no filesystem access. `state` and `input` are frozen — r
 Any string field supports `{{ path.to.value }}` interpolation resolved against flow state:
 
 ```
-{{ trigger.body }}              # initial input
+{{ inputs.body }}               # initial input payload (always available)
 {{ classification.category }}   # node with output: "classification" → access .category
-{{ trigger.user.email }}        # nested dotted path
+{{ inputs.user.email }}         # nested dotted path
 {{ research.web_results }}      # array or object (serialized to JSON string)
 ```
 
 **Important:** templates reference the **`output` key**, not the node name. If a node has `"name": "get_data", "output": "api"`, reference it as `{{ api }}` — not `{{ get_data }}`.
 
-Flow state starts as `{ trigger: <input> }` and grows as nodes complete.
+Flow state starts as `{ inputs: <payload> }` and grows as nodes complete. The
+caller (CLI, webhook server, parent flow, dashboard) is responsible for
+producing that payload — the flow itself is trigger-agnostic.
 
 ---
 
@@ -567,7 +572,7 @@ clawflow install lead-enrichment
 ```
 
 Every flow in the registry is:
-- Parameterized (inputs declared in `trigger`)
+- Parameterized (inputs declared in the `inputs:` block)
 - Runtime-agnostic (runs on OpenClaw or Cloudflare)
 - LLM-editable (agents can fork and modify them)
 
@@ -659,7 +664,7 @@ Rules:
          │             │             │  (coming soon) │
          │ 11 tools    │             │                │
          │ versioning  │             │ REST API       │
-         │ webhooks    │             │ Webhook recv   │
+         │ run server  │             │ /run endpoint  │
          └──────┬──────┘             └────────────────┘
                 │
          ┌──────▼──────────────────────────────┐

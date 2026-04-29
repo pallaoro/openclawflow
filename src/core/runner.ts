@@ -110,14 +110,32 @@ export class FlowRunner {
         status: "failed",
         flowName: flow.flow ?? "unknown",
         instanceId: id,
-        state: { trigger: input },
+        state: { inputs: input },
         trace: [],
         error: `Validation failed:\n${messages.join("\n")}`,
       };
     }
 
     const id = instanceId ?? crypto.randomUUID();
-    const state: FlowState = { trigger: input };
+    const state: FlowState = { inputs: input };
+
+    // Validate declared inputs against the actual payload before any node runs.
+    if (flow.inputs && typeof flow.inputs === "object") {
+      const payload = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+      const missing: string[] = [];
+      for (const [k, spec] of Object.entries(flow.inputs)) {
+        if (spec?.required && !(k in payload)) missing.push(k);
+      }
+      if (missing.length > 0) {
+        const error = `Missing required input${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}`;
+        this.store.create(id, flow.flow, state);
+        this.store.update(id, { status: "failed", error });
+        return {
+          ok: false, status: "failed", flowName: flow.flow ?? "unknown",
+          instanceId: id, state, trace: [], error,
+        };
+      }
+    }
 
     // Create state record first — ensures a state file exists even if env resolution fails
     this.store.create(id, flow.flow, state);
@@ -1378,7 +1396,7 @@ export class FlowRunner {
   /**
    * Wrap an object-style input with a Proxy that throws a descriptive error
    * when the code accesses a property that doesn't exist, showing what keys
-   * ARE available in input and in state.trigger.
+   * ARE available in input and in state.inputs.
    */
   private wrapWithDiagnosticProxy(
     obj: Record<string, unknown>,
@@ -1386,9 +1404,9 @@ export class FlowRunner {
     state: FlowState,
   ): Record<string, unknown> {
     const inputKeys = Object.keys(obj);
-    const triggerKeys =
-      state.trigger && typeof state.trigger === "object"
-        ? Object.keys(state.trigger as Record<string, unknown>)
+    const flowInputKeys =
+      state.inputs && typeof state.inputs === "object"
+        ? Object.keys(state.inputs as Record<string, unknown>)
         : [];
     const stateKeys = Object.keys(state);
 
@@ -1404,10 +1422,10 @@ export class FlowRunner {
         }
         const parts: string[] = [];
         parts.push(`'${p}' is not a key in input. Input keys: [${inputKeys.join(", ")}].`);
-        if (triggerKeys.includes(p)) {
-          parts.push(`Did you mean state.trigger.${p}? It exists in trigger.`);
-        } else if (triggerKeys.length > 0) {
-          parts.push(`Trigger keys: [${triggerKeys.join(", ")}].`);
+        if (flowInputKeys.includes(p)) {
+          parts.push(`Did you mean state.inputs.${p}? It exists in inputs.`);
+        } else if (flowInputKeys.length > 0) {
+          parts.push(`Flow input keys: [${flowInputKeys.join(", ")}].`);
         }
         if (stateKeys.length > 0) {
           parts.push(`State keys: [${stateKeys.join(", ")}].`);
@@ -1427,12 +1445,12 @@ export class FlowRunner {
     } else {
       parts.push("input is " + (input === undefined ? "undefined" : String(input)) + ".");
     }
-    const triggerKeys =
-      state.trigger && typeof state.trigger === "object"
-        ? Object.keys(state.trigger as Record<string, unknown>)
+    const flowInputKeys =
+      state.inputs && typeof state.inputs === "object"
+        ? Object.keys(state.inputs as Record<string, unknown>)
         : [];
-    if (triggerKeys.length > 0) {
-      parts.push(`Trigger keys: [${triggerKeys.join(", ")}].`);
+    if (flowInputKeys.length > 0) {
+      parts.push(`Flow input keys: [${flowInputKeys.join(", ")}].`);
     }
     parts.push(`State keys: [${Object.keys(state).join(", ")}].`);
     return parts.join(" ");

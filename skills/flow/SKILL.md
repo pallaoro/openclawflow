@@ -58,6 +58,37 @@ A flow is JSON with a `flow` name, an optional `env` block, and a `nodes` array.
 - `do: condition` for boolean if/else, `do: branch` for multi-way value matching — both run inline sub-flows and reconverge
 - Model shorthands: `fast` (Gemini 3 Flash), `smart` (Claude Sonnet 4.6), `best` (Minimax M2.5)
 
+### Declaring inputs
+
+Flows can declare the input fields they expect via the optional `inputs` block.
+A flow is **trigger-agnostic** — the runtime payload is just JSON that the
+caller (CLI, webhook server, parent flow, dashboard) supplies. Inside the flow,
+that payload is reachable as `{{ inputs.* }}` and `state.inputs` (in code nodes).
+
+```json
+{
+  "flow": "support-triage",
+  "inputs": {
+    "body": { "type": "string", "required": true, "description": "Ticket body text" },
+    "id":   { "type": "string", "required": true },
+    "vip":  { "type": "boolean" }
+  },
+  "nodes": [ ... ]
+}
+```
+
+Rules:
+
+- The `inputs` block is **optional**. When omitted, the flow accepts any
+  payload (anything-goes mode). Templates `{{ inputs.X }}` resolve at runtime.
+- When present, every entry marked `required: true` must be in the payload at
+  flow start. Missing required inputs fail the flow before any node executes.
+- Extra keys in the payload that aren't declared **pass through** and remain
+  reachable via `{{ inputs.* }}` — webhook envelopes can evolve without forcing
+  every flow to declare every new field.
+- When you **do** declare inputs, the validator catches typos like
+  `{{ inputs.email_too }}` (when only `email_to` is declared) at load time.
+
 ### Environment variables
 
 Flows can declare required and optional env vars via the `env` field. Three value types:
@@ -94,10 +125,10 @@ Access via `{{ env.VAR_NAME }}` in any template field. `process.env` always take
 Any string field supports `{{ path.to.value }}` interpolation. The top-level key is always the **`output` field value**, not the node name:
 
 ```
-{{ trigger.body }}              — initial input (trigger is always available)
+{{ inputs.body }}               — initial payload (inputs is always available)
 {{ env.API_KEY }}               — environment variable (env is always available)
 {{ classification.category }}   — node with output: "classification" → access .category
-{{ trigger.user.email }}        — nested dotted path from trigger
+{{ inputs.user.email }}         — nested dotted path from the input payload
 ```
 
 **Filters:** Use `{{ value | filter }}` to transform values inline:
@@ -138,7 +169,7 @@ AI nodes support an `attachments` field — an array of file paths or URLs sent 
   "name": "analyze-receipt",
   "do": "ai",
   "prompt": "Extract the total and vendor name from this receipt",
-  "attachments": ["{{ trigger.receiptPath }}"],
+  "attachments": ["{{ inputs.receiptPath }}"],
   "schema": { "total": "number", "vendor": "string" },
   "model": "smart",
   "output": "extracted"
@@ -333,7 +364,7 @@ EOF
   "name": "research_topic",
   "do": "agent",
   "agentId": "clawflow",
-  "task": "Research the latest trends in {{ trigger.topic }}",
+  "task": "Research the latest trends in {{ inputs.topic }}",
   "timeout": "240s",
   "output": "research"
 }
@@ -353,7 +384,7 @@ EOF
     {
       "name": "draft",
       "do": "ai",
-      "prompt": "Write a LinkedIn thought leadership post about: {{ trigger.topic }}\n\nTone: professional but conversational. Include a hook, 3-5 key points, and a question to drive engagement. Add 3 relevant hashtags.",
+      "prompt": "Write a LinkedIn thought leadership post about: {{ inputs.topic }}\n\nTone: professional but conversational. Include a hook, 3-5 key points, and a question to drive engagement. Add 3 relevant hashtags.",
       "schema": {
         "post": "string",
         "hook": "string",
@@ -375,7 +406,7 @@ EOF
     {
       "name": "research",
       "do": "ai",
-      "prompt": "Research the topic '{{ trigger.topic }}' and list 5 key insights",
+      "prompt": "Research the topic '{{ inputs.topic }}' and list 5 key insights",
       "schema": { "insights": "string[]" },
       "model": "smart",
       "output": "research"
@@ -415,7 +446,7 @@ EOF
     {
       "name": "parse",
       "do": "ai",
-      "prompt": "Extract items from: {{ trigger.text }}",
+      "prompt": "Extract items from: {{ inputs.text }}",
       "schema": { "items": [{ "type": "string", "name": "string" }] },
       "model": "smart",
       "output": "parsed"
@@ -444,7 +475,7 @@ EOF
     {
       "name": "notify",
       "do": "agent",
-      "task": "Send email to {{ trigger.email }} with these attachments:\n{{ process_items[*].outPath }}"
+      "task": "Send email to {{ inputs.email }} with these attachments:\n{{ process_items[*].outPath }}"
     }
   ]
 }
@@ -460,7 +491,7 @@ EOF
       "name": "extract",
       "do": "ai",
       "prompt": "Extract all line items, totals, and vendor info from this invoice",
-      "attachments": ["{{ trigger.invoicePath }}"],
+      "attachments": ["{{ inputs.invoicePath }}"],
       "schema": {
         "vendor": "string",
         "date": "string",
@@ -533,8 +564,8 @@ flows/
 
 ## Reading and discovering flows
 
-- `flow_list` — lists all flows with their description, expected inputs, trigger config, and published version info
-- `flow_read file: "my-flow"` — full definition with expected trigger inputs (extracted from `{{ trigger.* }}` templates) and available versions
+- `flow_list` — lists all flows with their description, declared `inputs:` block, and published version info
+- `flow_read file: "my-flow"` — full definition; response includes the declared `inputs:` block plus a best-effort `_expectedInputs` list extracted from `{{ inputs.* }}` templates, and available versions
 - `flow_read file: "my-flow" node: "classify"` — inspect a single node (searches nested structures)
 
 **Always use `flow_read` before running an unfamiliar flow** to understand what inputs it expects.

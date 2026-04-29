@@ -13,16 +13,24 @@ export interface FlowDefinition {
   flow: string; // unique name, e.g. "triage-support-ticket"
   version?: string; // semver, e.g. "1.0.0"
   description?: string;
-  trigger?: FlowTrigger;
+  /**
+   * Declared inputs the flow expects. Optional: when omitted, the flow accepts
+   * any payload (anything-goes mode). When present, required inputs must be
+   * supplied at runtime or the flow fails before any node executes. Extra
+   * undeclared keys in the payload pass through and are reachable via
+   * {{ inputs.* }} but are not statically checked.
+   */
+  inputs?: Record<string, InputSpec>;
   /** Environment variables the flow expects. Values are defaults; null means required (runtime must provide). */
   env?: Record<string, string | null>;
   nodes: FlowNode[];
 }
 
-export interface FlowTrigger {
-  on: "webhook" | "cron" | "manual" | "event" | string;
-  from?: string; // source label e.g. "helpdesk"
-  schedule?: string; // cron expression if on: cron
+export interface InputSpec {
+  type?: "string" | "number" | "boolean" | "object" | "array";
+  required?: boolean;
+  description?: string;
+  default?: unknown;
 }
 
 // ---- Retry Policy ---------------------------------------------------------------
@@ -265,7 +273,7 @@ export const NODE_KEYS: Record<string, ReadonlySet<string>> = {
 // ---- Runtime Types --------------------------------------------------------------
 
 export interface FlowState {
-  trigger?: unknown;
+  inputs?: unknown;
   [key: string]: unknown;
 }
 
@@ -377,7 +385,7 @@ export interface PluginConfig {
   inferenceFn?: InferenceFn;
   /** OpenClaw agent ID for do:agent nodes (e.g. "ops"). Falls back to --local if unset. */
   defaultAgent?: string;
-  /** Webhook server config — starts an HTTP server for triggering flows externally */
+  /** Optional HTTP server config — exposes a generic run endpoint per flow. */
   serve?: ServeConfig;
 }
 
