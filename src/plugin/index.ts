@@ -1,6 +1,6 @@
 import { FlowRunner, sendEvent } from "../core/runner.js";
 
-import { startWebhookServer } from "../core/serve.js";
+import { startFlowServer } from "../core/serve.js";
 import { validateFlow } from "../core/validate.js";
 import type { FlowDefinition, FlowNode, PluginConfig, BranchNode, ConditionNode, LoopNode, ParallelNode } from "../core/types.js";
 
@@ -64,10 +64,10 @@ function register(api: PluginApi) {
   const runner = new FlowRunner(pluginCfg);
   const store = runner.getStore();
 
-  // ---- Webhook server (optional) ------------------------------------------------
+  // ---- Flow server (optional) ---------------------------------------------------
   // Skip when spawned as a child agent (CLAWFLOW_NO_SERVE) to avoid port conflicts.
   if (pluginCfg.serve && !process.env.CLAWFLOW_NO_SERVE) {
-    startWebhookServer({
+    startFlowServer({
       runner,
       serve: pluginCfg.serve,
       logger: api.logger,
@@ -182,11 +182,11 @@ All nodes require "name" and "do". Templates: {{ outputKey.field }}.`,
             items: { type: "object", additionalProperties: true },
             description: "Array of node definitions",
           },
-          trigger: {
+          inputs: {
             type: "object",
             additionalProperties: true,
             description:
-              'Trigger configuration: { on: "webhook"|"cron"|"manual"|"event", schedule?, from? }',
+              'Declared inputs the flow expects. Map of name → { type?, required?, description?, default? }. Optional: when omitted, the flow accepts any payload. When present, required inputs are enforced before any node runs.',
           },
           env: {
             type: "object",
@@ -207,7 +207,7 @@ All nodes require "name" and "do". Templates: {{ outputKey.field }}.`,
           flow: string;
           description?: string;
           nodes: FlowNode[];
-          trigger?: FlowDefinition["trigger"];
+          inputs?: FlowDefinition["inputs"];
           env?: Record<string, string | null>;
           version?: string;
         },
@@ -243,7 +243,7 @@ All nodes require "name" and "do". Templates: {{ outputKey.field }}.`,
           flow: params.flow,
           ...(params.version && { version: params.version }),
           ...(params.description && { description: params.description }),
-          ...(params.trigger && { trigger: params.trigger }),
+          ...(params.inputs && { inputs: params.inputs }),
           ...(params.env && { env: params.env }),
           nodes: params.nodes,
         };
@@ -470,13 +470,13 @@ directory. If the flow file already exists, the restore is rejected.`,
       description: `Run an agentic workflow in the clawflow format.
 
 State model:
-  The "input" parameter becomes "trigger" in flow state.
-  Flow state = { trigger, env?, ...nodeOutputs }.
+  The "input" parameter becomes "inputs" in flow state (i.e. state.inputs).
+  Flow state = { inputs, env?, ...nodeOutputs }.
   Each node with "output" adds its result to state (e.g. output: "result" → state.result).
   In code nodes: fn(input, state) — "input" is the resolved node.input field, "state" is the full flow state.
-  IMPORTANT: trigger contains ALL initial data. If you need different parts of trigger in a code node,
-  use object-style input: { "payload": "trigger.payload", "email": "trigger.email_to" }
-  or access via state.trigger.field inside the code.
+  IMPORTANT: inputs contains ALL initial data. If you need different parts of inputs in a code node,
+  use object-style input: { "payload": "inputs.payload", "email": "inputs.email_to" }
+  or access via state.inputs.field inside the code.
 
 Node types:
   ai       — LLM call, structured or freeform. Use schema: for typed output.
@@ -521,7 +521,7 @@ Set version to run a specific published version.`,
           input: {
             type: "object",
             additionalProperties: true,
-            description: "Input data, available as trigger.* in the flow",
+            description: "Input data, available as inputs.* in the flow (and at state.inputs in code nodes).",
           },
           draft: {
             type: "boolean",
@@ -836,7 +836,7 @@ Status values: running | completed | paused | waiting | failed | cancelled`,
       description: `List all saved flow definitions in the workspace.
 
 Scans the flows directory for .json files and returns a summary of each flow
-including its name, description, trigger, version, node count, and file path.
+including its name, description, declared inputs, version, node count, and file path.
 Use this to discover available flows before running or editing them.`,
 
       parameters: {
@@ -896,7 +896,7 @@ Use this to discover available flows before running or editing them.`,
           file: string;
           flow: string;
           description?: string;
-          trigger?: unknown;
+          inputs?: FlowDefinition["inputs"];
           expectedInputs?: string[];
           publishedVersion?: number;
           totalVersions?: number;
@@ -909,15 +909,15 @@ Use this to discover available flows before running or editing them.`,
             const raw = fs.readFileSync(abs, "utf-8");
             const def = JSON.parse(raw) as FlowDefinition;
             if (!def.flow || !Array.isArray(def.nodes)) continue;
-            const inputs = extractTriggerInputs(def.nodes);
+            const referenced = extractInputRefs(def.nodes);
             const flowName = file.replace(/\.json$/, "");
             const versions = listVersions(flowName);
             flows.push({
               file: abs,
               flow: def.flow,
               ...(def.description && { description: def.description }),
-              ...(def.trigger && { trigger: def.trigger }),
-              ...(inputs.length > 0 && { expectedInputs: inputs }),
+              ...(def.inputs && { inputs: def.inputs }),
+              ...(referenced.length > 0 && { expectedInputs: referenced }),
               ...(versions.length > 0 && {
                 publishedVersion: versions[versions.length - 1],
                 totalVersions: versions.length,
@@ -954,12 +954,13 @@ Use this to discover available flows before running or editing them.`,
   // ---- flow_read ----------------------------------------------------------------
 
   /**
-   * Recursively extract unique trigger.* paths from any string values in an
-   * object tree. This tells agents what input fields a flow expects.
+   * Recursively extract unique inputs.* paths from any string values in an
+   * object tree. This tells agents what input fields a flow references — used
+   * when the flow has no declared inputs block to give a best-effort hint.
    */
-  function extractTriggerInputs(obj: unknown): string[] {
+  function extractInputRefs(obj: unknown): string[] {
     const paths = new Set<string>();
-    const re = /\{\{\s*trigger\.(\w+(?:\.\w+)*)/g;
+    const re = /\{\{\s*inputs\.(\w+(?:\.\w+)*)/g;
 
     function walk(val: unknown): void {
       if (typeof val === "string") {
@@ -1012,9 +1013,11 @@ Use this to discover available flows before running or editing them.`,
       name: "flow_read",
       description: `Read a flow definition from file and return its contents.
 
-Returns the full flow definition (or a single node if specified) along with
-the list of expected trigger inputs extracted from templates. Use this to
-inspect a flow before running it or to understand what inputs it needs.
+Returns the full flow definition (or a single node if specified). The response
+includes the declared "inputs" block when present, plus a best-effort list of
+input fields referenced by templates (extracted from {{ inputs.* }} usages).
+Use this to inspect a flow before running it or to understand what inputs it
+needs.
 
 Versioning: by default reads the draft (working copy). Set version to read
 a specific published version. The response includes available version numbers.`,
@@ -1090,7 +1093,7 @@ a specific published version. The response includes available version numbers.`,
           source = "draft";
         }
 
-        const inputs = extractTriggerInputs(flowDef.nodes);
+        const referenced = extractInputRefs(flowDef.nodes);
 
         // Single node mode
         if (params.node) {
@@ -1105,7 +1108,7 @@ a specific published version. The response includes available version numbers.`,
               ],
             };
           }
-          const nodeInputs = extractTriggerInputs(found);
+          const nodeInputs = extractInputRefs(found);
           const result = {
             flow: flowDef.flow,
             _source: source,
@@ -1126,7 +1129,7 @@ a specific published version. The response includes available version numbers.`,
           _source: source,
           _file: abs,
           ...(versions.length > 0 && { _versions: versions }),
-          ...(inputs.length > 0 && { _expectedInputs: inputs }),
+          ...(referenced.length > 0 && { _expectedInputs: referenced }),
         };
         return {
           content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -1242,7 +1245,7 @@ modify the draft without affecting published versions.`,
       description: `Edit nodes in a clawflow definition. Operates on a file or inline flow.
 
 Actions:
-  set     — set top-level flow fields (description, trigger, env, version)
+  set     — set top-level flow fields (description, inputs, env, version)
   update  — update a node entirely or patch specific fields by node name
   add     — insert a new node at a position (default: end)
   remove  — remove a node by name
@@ -1265,7 +1268,7 @@ edit is rejected and errors are returned. For file-based flows, the file is
 overwritten with the updated definition on success.
 
 Examples:
-  Set flow fields:    { action: "set", fields: { description: "New desc", trigger: { on: "webhook" } } }
+  Set flow fields:    { action: "set", fields: { description: "New desc", inputs: { ticket_id: { type: "string", required: true } } } }
   Update one field:   { action: "update", node: "classify", fields: { prompt: "New prompt" } }
   Replace full node:  { action: "update", node: "classify", replace: { name: "classify", do: "ai", prompt: "..." } }
   Add at position:    { action: "add", position: 2, nodeDefinition: { name: "step3", do: "code", run: "..." } }
@@ -1307,7 +1310,7 @@ Examples:
           fields: {
             type: "object",
             additionalProperties: true,
-            description: "For action=set: top-level flow fields to set (description, trigger, env, version). For action=update: partial field updates to merge into the node.",
+            description: "For action=set: top-level flow fields to set (description, inputs, env, version). For action=update: partial field updates to merge into the node.",
           },
           replace: {
             type: "object",
@@ -1575,7 +1578,7 @@ Examples:
           if (!params.fields)
             return fail('action "set" requires "fields".');
 
-          const allowed = ["description", "trigger", "env", "version"];
+          const allowed = ["description", "inputs", "env", "version"];
           const backup = { ...flowDef };
 
           for (const [key, value] of Object.entries(params.fields)) {

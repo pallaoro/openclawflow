@@ -10,7 +10,7 @@ export type {
   FlowState,
   FlowResult,
   FlowStatus,
-  FlowTrigger,
+  InputSpec,
   TraceEntry,
   NodeStatus,
   RetryPolicy,
@@ -33,6 +33,6 @@ export type {
   ExecNode,
 } from "./core/types.js";
 export { parseDuration, MODEL_MAP, DEFAULT_MODEL, NODE_KEYS } from "./core/types.js";
-export { startWebhookServer } from "./core/serve.js";
-export type { WebhookServerOpts } from "./core/serve.js";
+export { startFlowServer } from "./core/serve.js";
+export type { FlowServerOpts } from "./core/serve.js";
 export type { ServeConfig } from "./core/types.js";
