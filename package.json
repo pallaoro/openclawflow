@@ -1,6 +1,6 @@
 {
   "name": "@clawnify/clawflow",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "The n8n for agents. A declarative, AI-native workflow format that agents can read, write, and run.",
   "type": "module",
   "main": "./dist/index.js",
@@ -15,8 +15,11 @@
       "types": "./dist/core/index.d.ts"
     }
   },
+  "bin": {
+    "clawflow": "./dist/migrate.js"
+  },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && chmod +x dist/migrate.js",
     "test": "node --import tsx --test tests/*.test.ts",
     "lint": "tsc --noEmit",
     "clean": "rm -rf dist",
