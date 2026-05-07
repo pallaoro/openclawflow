@@ -387,6 +387,12 @@ export interface PluginConfig {
   defaultAgent?: string;
   /** Optional HTTP server config — exposes a generic run endpoint per flow. */
   serve?: ServeConfig;
+  /**
+   * Optional custom step registry. Defaults to the module-level singleton
+   * populated by `registerStepType()`. Provide a private registry for
+   * test isolation or to run multiple FlowRunners with different step sets.
+   */
+  customSteps?: import("./custom-steps.js").StepRegistry;
 }
 
 // ---- Model Shorthands -----------------------------------------------------------

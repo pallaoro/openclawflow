@@ -30,6 +30,12 @@ import {
 } from "./types.js";
 import { StateStore } from "./store.js";
 import { validateFlow } from "./validate.js";
+import {
+  defaultRegistry,
+  type CustomStepContext,
+  type CustomStepDefinition,
+  type StepRegistry,
+} from "./custom-steps.js";
 
 // ---- Event Bus ------------------------------------------------------------------
 // External systems call sendEvent(instanceId, type, payload) to unblock
@@ -85,10 +91,18 @@ function applyFilter(val: unknown, filter: string): unknown {
 export class FlowRunner {
   private cfg: PluginConfig;
   private store: StateStore;
+  private registry: StepRegistry;
+  /**
+   * Per-flow AbortControllers. Lazily created in execCustomStep on first
+   * use so the same flow run sees the same signal across steps. When a
+   * flow-cancel API is wired in, it should call abort() and delete here.
+   */
+  private abortControllers = new Map<string, AbortController>();
 
   constructor(cfg: PluginConfig) {
     this.cfg = cfg;
     this.store = new StateStore(cfg.stateDir);
+    this.registry = cfg.customSteps ?? defaultRegistry;
   }
 
   // ---- Start a new run ----------------------------------------------------------
@@ -99,7 +113,7 @@ export class FlowRunner {
     instanceId?: string,
   ): Promise<FlowResult> {
     // Static validation before execution
-    const validation = validateFlow(flow);
+    const validation = validateFlow(flow, { registry: this.registry });
     if (!validation.ok) {
       const id = instanceId ?? crypto.randomUUID();
       const messages = validation.errors.map((e) =>
@@ -510,8 +524,18 @@ export class FlowRunner {
         return this.execCode(node as CodeNode, state);
       case "exec":
         return this.execExec(node as ExecNode, state);
-      default:
-        throw new Error(`Unknown node type: "${(node as FlowNode & { do: string }).do}"`);
+      default: {
+        const stepName = (node as FlowNode & { do: string }).do;
+        const def = this.registry.get(stepName);
+        if (!def) {
+          const known = this.registry.names();
+          const hint = known.length
+            ? ` Registered custom steps: ${known.join(", ")}.`
+            : " No custom steps are registered — is the plugin loaded?";
+          throw new Error(`Unknown step type: "${stepName}".${hint}`);
+        }
+        return this.execCustomStep(node, def, state, instanceId);
+      }
     }
   }
 
@@ -1170,6 +1194,54 @@ export class FlowRunner {
     } catch {
       return { output: text };
     }
+  }
+
+  // ---- do: <custom step> --------------------------------------------------------
+
+  private async execCustomStep(
+    node: FlowNode,
+    def: CustomStepDefinition,
+    state: FlowState,
+    instanceId: string,
+  ): Promise<{ output: unknown }> {
+    // Build the input view: every declared field, with templates pre-resolved
+    // (mirrors do: http for url/body/headers). Non-string scalars pass through.
+    const input: Record<string, unknown> = {};
+    const raw = node as unknown as Record<string, unknown>;
+    for (const field of def.allowedKeys) {
+      const value = raw[field];
+      if (value === undefined) continue;
+      input[field] = this.resolveBodyObject(value, state);
+    }
+
+    // Lazily create a per-flow AbortController. Same signal across all custom
+    // steps in the run, so cancelling the flow aborts every in-flight step.
+    let controller = this.abortControllers.get(instanceId);
+    if (!controller) {
+      controller = new AbortController();
+      this.abortControllers.set(instanceId, controller);
+    }
+
+    const env = (state.env && typeof state.env === "object")
+      ? (state.env as Record<string, string>)
+      : {};
+    const logPrefix = `[${node.name}:${def.name}]`;
+    const ctx: CustomStepContext = {
+      state: this.deepFreeze(JSON.parse(JSON.stringify(state))),
+      env,
+      logger: {
+        debug: (msg, ...rest) => console.debug(logPrefix, msg, ...rest),
+        info: (msg, ...rest) => console.info(logPrefix, msg, ...rest),
+        warn: (msg, ...rest) => console.warn(logPrefix, msg, ...rest),
+        error: (msg, ...rest) => console.error(logPrefix, msg, ...rest),
+      },
+      abortSignal: controller.signal,
+      nodeName: node.name,
+      resolveTemplate: (template: string) => this.resolveTemplate(template, state),
+    };
+
+    const output = await def.run(input, ctx);
+    return { output };
   }
 
   // ---- do: memory ---------------------------------------------------------------
