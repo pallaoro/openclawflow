@@ -3,7 +3,23 @@ export { FlowRunner, sendEvent } from "./core/runner.js";
 export { StateStore } from "./core/store.js";
 export { transpileToCloudflare } from "./core/transpile.js";
 export { validateFlow } from "./core/validate.js";
-export type { ValidationError, ValidationResult } from "./core/validate.js";
+export type {
+  ValidationError,
+  ValidationResult,
+  ValidateFlowOptions,
+} from "./core/validate.js";
+export {
+  registerStepType,
+  defaultRegistry,
+  StepRegistry,
+} from "./core/custom-steps.js";
+export type {
+  CustomStepContext,
+  CustomStepDefinition,
+  CustomStepValidator,
+  CustomStepValidatorResult,
+  CustomStepValidationFailure,
+} from "./core/custom-steps.js";
 export type {
   FlowDefinition,
   FlowNode,

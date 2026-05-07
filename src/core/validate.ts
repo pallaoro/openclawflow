@@ -15,6 +15,7 @@ import {
   type CodeNode,
   type ExecNode,
 } from "./types.js";
+import { defaultRegistry, type StepRegistry } from "./custom-steps.js";
 
 // ---- Flow Validator -------------------------------------------------------------
 // Static checks run before execution to catch common authoring mistakes.
@@ -30,7 +31,16 @@ export interface ValidationResult {
   errors: ValidationError[];
 }
 
-export function validateFlow(flow: FlowDefinition): ValidationResult {
+export interface ValidateFlowOptions {
+  /** Registry of custom step types. Defaults to the module-level singleton. */
+  registry?: StepRegistry;
+}
+
+export function validateFlow(
+  flow: FlowDefinition,
+  opts: ValidateFlowOptions = {},
+): ValidationResult {
+  const registry = opts.registry ?? defaultRegistry;
   const errors: ValidationError[] = [];
 
   if (!flow.flow || typeof flow.flow !== "string") {
@@ -62,7 +72,7 @@ export function validateFlow(flow: FlowDefinition): ValidationResult {
   errors.push(...nameErrors);
 
   // Walk all nodes and validate
-  validateNodes(flow.nodes, new Set<string>(), errors);
+  validateNodes(flow.nodes, new Set<string>(), errors, registry);
 
   return { ok: errors.length === 0, errors };
 }
@@ -128,6 +138,7 @@ function validateNodes(
   nodes: FlowNode[],
   parentAvailable: Set<string>,
   errors: ValidationError[],
+  registry: StepRegistry,
 ): void {
   // Available keys: inputs and env are always available + anything from parent scope
   const available = new Set(parentAvailable);
@@ -136,16 +147,16 @@ function validateNodes(
 
   for (const node of nodes) {
     // Validate required fields per node type
-    validateNodeFields(node, errors);
+    validateNodeFields(node, errors, registry);
 
     // Check template references in string fields
-    checkTemplateRefs(node, available, errors);
+    checkTemplateRefs(node, available, errors, registry);
 
     // Check state references in branch `on` and condition `if`
     checkStateRefs(node, available, errors);
 
     // Recurse into sub-flows with current available set
-    validateSubFlows(node, available, errors);
+    validateSubFlows(node, available, errors, registry);
 
     // After this node, its output key becomes available
     if (node.output) {
@@ -154,8 +165,21 @@ function validateNodes(
   }
 }
 
+// Base keys allowed on any node (mirrors BASE_KEYS in types.ts).
+const BASE_NODE_KEYS: ReadonlySet<string> = new Set([
+  "name",
+  "do",
+  "output",
+  "retry",
+  "timeout",
+]);
+
 /** Validate required fields per node type */
-function validateNodeFields(node: FlowNode, errors: ValidationError[]): void {
+function validateNodeFields(
+  node: FlowNode,
+  errors: ValidationError[],
+  registry: StepRegistry,
+): void {
   const e = (field: string, msg: string) =>
     errors.push({ node: node.name, field, message: msg });
 
@@ -165,8 +189,11 @@ function validateNodeFields(node: FlowNode, errors: ValidationError[]): void {
     return;
   }
 
-  // Check for unknown keys
-  const allowed = NODE_KEYS[nodeType];
+  // Built-in: allowed keys come from NODE_KEYS. Custom: from the registry's allowedKeys.
+  const customStep = registry.get(nodeType);
+  const allowed = NODE_KEYS[nodeType] ?? (customStep
+    ? new Set([...BASE_NODE_KEYS, ...customStep.allowedKeys])
+    : undefined);
   if (allowed) {
     for (const key of Object.keys(node)) {
       if (!allowed.has(key)) {
@@ -265,12 +292,35 @@ function validateNodeFields(node: FlowNode, errors: ValidationError[]): void {
       if (!n.command) e("command", `exec node "${node.name}" requires "command"`);
       break;
     }
-    default:
-      errors.push({
-        node: node.name,
-        field: "do",
-        message: `Unknown node type "${nodeType}"`,
-      });
+    default: {
+      if (!customStep) {
+        errors.push({
+          node: node.name,
+          field: "do",
+          message: `Unknown node type "${nodeType}"`,
+        });
+        break;
+      }
+      // Custom-step validator: build the input view (top-level fields excluding base
+      // keys) and surface errors with the same `{ node, field, message }` shape.
+      if (customStep.validate) {
+        const input: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(node)) {
+          if (!BASE_NODE_KEYS.has(k)) input[k] = v;
+        }
+        const result = customStep.validate(input);
+        if (!result.ok) {
+          for (const failure of result.errors) {
+            errors.push({
+              node: node.name,
+              field: failure.field,
+              message: failure.message,
+            });
+          }
+        }
+      }
+      break;
+    }
   }
 }
 
@@ -279,8 +329,9 @@ function checkTemplateRefs(
   node: FlowNode,
   available: Set<string>,
   errors: ValidationError[],
+  registry: StepRegistry,
 ): void {
-  const strings = collectStringFields(node);
+  const strings = collectStringFields(node, registry);
   // Simple path + optional filter
   const templatePattern = /\{\{\s*([\w.]+)\s*(?:\|\s*\w+)?\s*\}\}/g;
   // Wildcard: {{ path[*].field }}
@@ -398,23 +449,24 @@ function validateSubFlows(
   node: FlowNode,
   available: Set<string>,
   errors: ValidationError[],
+  registry: StepRegistry,
 ): void {
   switch (node.do) {
     case "branch": {
       const n = node as BranchNode;
       for (const nodes of Object.values(n.paths)) {
-        validateNodes(nodes, available, errors);
+        validateNodes(nodes, available, errors, registry);
       }
       if (n.default) {
-        validateNodes(n.default, available, errors);
+        validateNodes(n.default, available, errors, registry);
       }
       break;
     }
     case "condition": {
       const n = node as ConditionNode;
-      validateNodes(n.then, available, errors);
+      validateNodes(n.then, available, errors, registry);
       if (n.else) {
-        validateNodes(n.else, available, errors);
+        validateNodes(n.else, available, errors, registry);
       }
       break;
     }
@@ -422,14 +474,14 @@ function validateSubFlows(
       const n = node as LoopNode;
       const loopAvailable = new Set(available);
       loopAvailable.add(n.as); // loop variable is available inside
-      validateNodes(n.nodes, loopAvailable, errors);
+      validateNodes(n.nodes, loopAvailable, errors, registry);
       break;
     }
     case "parallel": {
       const n = node as ParallelNode;
       // Each parallel branch has the same available set (they run concurrently)
       for (const child of n.nodes) {
-        validateNodes([child], available, errors);
+        validateNodes([child], available, errors, registry);
       }
       break;
     }
@@ -437,10 +489,18 @@ function validateSubFlows(
 }
 
 /** Collect all string-valued fields from a node (for template checking) */
-function collectStringFields(node: FlowNode): { field: string; value: string }[] {
+function collectStringFields(
+  node: FlowNode,
+  registry: StepRegistry,
+): { field: string; value: string }[] {
   const result: { field: string; value: string }[] = [];
-  // Fields that contain template-interpolated strings
-  const templateFields = ["prompt", "task", "url", "key", "value", "run", "body", "if", "command", "cwd", "preview"];
+  // Fields that contain template-interpolated strings on built-in nodes.
+  const builtInTemplateFields = ["prompt", "task", "url", "key", "value", "run", "body", "if", "command", "cwd", "preview"];
+  // For custom-step nodes, every declared field is treated as potentially template-bearing.
+  const customStep = typeof node.do === "string" ? registry.get(node.do) : undefined;
+  const templateFields = customStep
+    ? Array.from(new Set([...builtInTemplateFields, ...customStep.allowedKeys]))
+    : builtInTemplateFields;
 
   for (const field of templateFields) {
     const val = (node as unknown as Record<string, unknown>)[field];
