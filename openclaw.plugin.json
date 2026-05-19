@@ -2,8 +2,23 @@
   "id": "clawflow",
   "name": "ClawFlow",
   "description": "The n8n for agents. Declarative, AI-native workflow engine — LLM-writable, Cloudflare-portable.",
-  "version": "0.2.2",
+  "version": "1.2.0",
   "skills": ["./skills/flow"],
+  "contracts": {
+    "tools": [
+      "flow_create",
+      "flow_delete",
+      "flow_restore_from_bin",
+      "flow_run",
+      "flow_resume",
+      "flow_send_event",
+      "flow_status",
+      "flow_list",
+      "flow_read",
+      "flow_publish",
+      "flow_edit"
+    ]
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
