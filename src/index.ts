@@ -1,4 +1,10 @@
-// clawflow — core exports
+// clawflow — core exports + OpenClaw plugin entry
+//
+// The default export is the OpenClaw plugin definition (id, register). Named
+// exports are the public library surface (FlowRunner, validateFlow, etc.) for
+// standalone consumers (e.g. `@clawnify/clawflow` as a Cloudflare runtime).
+export { default } from "./plugin/index.js";
+
 export { FlowRunner, sendEvent } from "./core/runner.js";
 export { StateStore } from "./core/store.js";
 export { transpileToCloudflare } from "./core/transpile.js";
