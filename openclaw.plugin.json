@@ -38,6 +38,16 @@
           "flowsDir": { "type": "string" }
         },
         "required": ["port"]
+      },
+      "approval": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "skipSessionPatterns": { "type": "array", "items": { "type": "string" } },
+          "timeoutMs": { "type": "number" },
+          "timeoutBehavior": { "type": "string", "enum": ["allow", "deny"] }
+        }
       }
     }
   },
@@ -49,6 +59,7 @@
     "memoryDir": { "label": "Memory Directory" },
     "stateDir": { "label": "Flow State Directory" },
     "maxNodeDurationMs": { "label": "Node Timeout (ms)", "placeholder": "30000" },
-    "serve": { "label": "Flow HTTP Server", "help": "Start an HTTP server that runs flows on POST. Requires at least port. Endpoint: POST /<basePath>/<flowName>/run with the JSON body as the flow's inputs." }
+    "serve": { "label": "Flow HTTP Server", "help": "Start an HTTP server that runs flows on POST. Requires at least port. Endpoint: POST /<basePath>/<flowName>/run with the JSON body as the flow's inputs." },
+    "approval": { "label": "Approval Gate", "help": "Prompt the user before flow_run executes. Set enabled=false to disable entirely. Add session-key substrings to skipSessionPatterns to bypass for unattended hooks (e.g. \"email\" for inbound-email automation)." }
   }
 }
