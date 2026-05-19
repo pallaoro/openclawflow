@@ -1,5 +1,5 @@
 <p align="center" dir="auto">
-  <a target="_blank" rel="noopener noreferrer" href="https://www.clawnify.com"><img src="https://github.com/user-attachments/assets/ff7c98e6-ee70-4b4c-89ff-7c530369fdcb" alt="ClawFlow" width="600" style="max-width: 100%;"></a>
+  <a target="_blank" rel="noopener noreferrer" href="https://www.clawnify.com"><img src="https://github.com/user-attachments/assets/246bcdb2-a508-4c21-a8db-081b6baf4526" alt="ClawFlow" width="600" style="max-width: 100%;"></a>
 </p>
 <div class="markdown-heading" dir="auto"><h1 align="center" tabindex="-1" class="heading-element" dir="auto">ClawFlow</h1><a id="user-content-clawflow" class="anchor" aria-label="Permalink: ClawFlow" href="#clawflow"></a></div>
 
