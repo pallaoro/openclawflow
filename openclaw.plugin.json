@@ -2,8 +2,23 @@
   "id": "clawflow",
   "name": "ClawFlow",
   "description": "The n8n for agents. Declarative, AI-native workflow engine — LLM-writable, Cloudflare-portable.",
-  "version": "0.2.2",
+  "version": "1.2.0",
   "skills": ["./skills/flow"],
+  "contracts": {
+    "tools": [
+      "flow_create",
+      "flow_delete",
+      "flow_restore_from_bin",
+      "flow_run",
+      "flow_resume",
+      "flow_send_event",
+      "flow_status",
+      "flow_list",
+      "flow_read",
+      "flow_publish",
+      "flow_edit"
+    ]
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -23,6 +38,16 @@
           "flowsDir": { "type": "string" }
         },
         "required": ["port"]
+      },
+      "approval": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "skipSessionPatterns": { "type": "array", "items": { "type": "string" } },
+          "timeoutMs": { "type": "number" },
+          "timeoutBehavior": { "type": "string", "enum": ["allow", "deny"] }
+        }
       }
     }
   },
@@ -34,6 +59,7 @@
     "memoryDir": { "label": "Memory Directory" },
     "stateDir": { "label": "Flow State Directory" },
     "maxNodeDurationMs": { "label": "Node Timeout (ms)", "placeholder": "30000" },
-    "serve": { "label": "Flow HTTP Server", "help": "Start an HTTP server that runs flows on POST. Requires at least port. Endpoint: POST /<basePath>/<flowName>/run with the JSON body as the flow's inputs." }
+    "serve": { "label": "Flow HTTP Server", "help": "Start an HTTP server that runs flows on POST. Requires at least port. Endpoint: POST /<basePath>/<flowName>/run with the JSON body as the flow's inputs." },
+    "approval": { "label": "Approval Gate", "help": "Prompt the user before flow_run executes. Set enabled=false to disable entirely. Add session-key substrings to skipSessionPatterns to bypass for unattended hooks (e.g. \"email\" for inbound-email automation)." }
   }
 }

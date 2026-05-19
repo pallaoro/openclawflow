@@ -393,6 +393,30 @@ export interface PluginConfig {
    * test isolation or to run multiple FlowRunners with different step sets.
    */
   customSteps?: import("./custom-steps.js").StepRegistry;
+  /**
+   * Approval gate for the `flow_run` tool. Flows can call HTTP, exec, and
+   * agent tools, so by default the plugin prompts the user before each run.
+   * Hosts that need unattended automation can disable the gate entirely or
+   * skip it for specific session contexts.
+   */
+  approval?: ApprovalConfig;
+}
+
+export interface ApprovalConfig {
+  /** Disable the approval gate entirely. Default: `true` (gate enabled). */
+  enabled?: boolean;
+  /**
+   * Substrings matched against the current session key. If any substring
+   * appears in the session key, the approval gate is skipped for that run.
+   * Useful for hook-driven sessions where no interactive channel is bound
+   * (e.g. inbound email automation, where the session key looks like
+   * `agent:main:main:email:<message-id>`). Default: `[]`.
+   */
+  skipSessionPatterns?: string[];
+  /** Override the prompt timeout (ms). Default: `300000` (5 min). */
+  timeoutMs?: number;
+  /** Action on prompt timeout: `"allow"` or `"deny"`. Default: `"deny"`. */
+  timeoutBehavior?: "allow" | "deny";
 }
 
 // ---- Model Shorthands -----------------------------------------------------------
