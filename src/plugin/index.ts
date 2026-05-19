@@ -22,12 +22,12 @@ import type { FlowDefinition, FlowNode, PluginConfig, BranchNode, ConditionNode,
 interface PluginApi {
   registerTool: (def: object, opts?: { optional?: boolean }) => void;
   registerHook?: (
-    name: string,
+    events: string | string[],
     handler: (event: { tool?: string; params?: unknown; [k: string]: unknown }) =>
       | { requireApproval?: boolean; prompt?: string; block?: boolean }
       | void
       | Promise<{ requireApproval?: boolean; prompt?: string; block?: boolean } | void>,
-    opts?: { priority?: number },
+    opts: { name: string; description?: string; priority?: number },
   ) => void;
   config?: {
     plugins?: { entries?: Record<string, { config?: PluginConfig }> };
@@ -78,17 +78,24 @@ function register(api: PluginApi) {
   // Pause and prompt the user before any flow_run invocation. Flows can have
   // side effects (HTTP, exec, agent delegation) so we require explicit consent.
   if (api.registerHook) {
-    api.registerHook("before_tool_call", (event) => {
-      if (event.tool !== "flow_run") return;
-      const p = (event.params ?? {}) as { file?: string; flow?: { flow?: string }; version?: number; draft?: boolean };
-      const target = p.file ?? p.flow?.flow ?? "inline flow";
-      const variant =
-        p.version != null ? ` v${p.version}` : p.draft ? " (draft)" : "";
-      return {
-        requireApproval: true,
-        prompt: `Run clawflow "${target}"${variant}?`,
-      };
-    });
+    api.registerHook(
+      "before_tool_call",
+      (event) => {
+        if (event.tool !== "flow_run") return;
+        const p = (event.params ?? {}) as { file?: string; flow?: { flow?: string }; version?: number; draft?: boolean };
+        const target = p.file ?? p.flow?.flow ?? "inline flow";
+        const variant =
+          p.version != null ? ` v${p.version}` : p.draft ? " (draft)" : "";
+        return {
+          requireApproval: true,
+          prompt: `Run clawflow "${target}"${variant}?`,
+        };
+      },
+      {
+        name: "clawflow-flow-run-approval",
+        description: "Request user approval before executing flow_run (flows can call HTTP, exec, and agent tools).",
+      },
+    );
   } else {
     api.logger?.warn(
       "clawflow: registerHook unavailable — flow_run will run without approval gate. Update OpenClaw to enable.",
