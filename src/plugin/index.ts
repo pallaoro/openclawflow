@@ -1,3 +1,6 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
+
 import { FlowRunner, sendEvent } from "../core/runner.js";
 
 import { startFlowServer } from "../core/serve.js";
@@ -156,7 +159,6 @@ function register(api: PluginApi) {
 
   /** Resolve a file param to an absolute path using workspace conventions. */
   function resolveFlowFile(file: string): string {
-    const path = require("path") as typeof import("path");
     const base = workspace;
     if (file.startsWith("/")) return file;
     if (file.includes("/")) return path.join(base, file);
@@ -166,14 +168,12 @@ function register(api: PluginApi) {
 
   /** Get the versions directory for a flow name. */
   function versionsDir(flowName: string): string {
-    const path = require("path") as typeof import("path");
     const base = workspace;
     return path.join(base, ".clawflow", "versions", flowName);
   }
 
   /** List all published version numbers for a flow, sorted ascending. */
   function listVersions(flowName: string): number[] {
-    const fs = require("fs") as typeof import("fs");
     const dir = versionsDir(flowName);
     if (!fs.existsSync(dir)) return [];
     return fs.readdirSync(dir)
@@ -184,8 +184,6 @@ function register(api: PluginApi) {
 
   /** Read a specific published version. Returns null if not found. */
   function readVersion(flowName: string, version: number): FlowDefinition | null {
-    const fs = require("fs") as typeof import("fs");
-    const path = require("path") as typeof import("path");
     const file = path.join(versionsDir(flowName), `${version}.json`);
     if (!fs.existsSync(file)) return null;
     return JSON.parse(fs.readFileSync(file, "utf-8")) as FlowDefinition;
