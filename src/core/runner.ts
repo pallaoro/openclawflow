@@ -806,12 +806,17 @@ export class FlowRunner {
     maxTokens?: number,
     content?: ContentPart[],
   ): Promise<string> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    };
+    if (provider === "OpenRouter") {
+      headers["HTTP-Referer"] = "https://clawnify.com";
+      headers["X-OpenRouter-Title"] = "Clawnify";
+    }
     const resp = await fetch(`${baseUrl}/v1/chat/completions`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
+      headers,
       body: JSON.stringify({
         model,
         max_tokens: maxTokens,
